@@ -99,8 +99,8 @@ func _read_manifest(path: String, root_path: String) -> ModManifest:
 		discovery_errors.append("Invalid or missing mod ID: %s"%[path])
 		return null
 	
-	if typeof(version_value) != TYPE_STRING or ModVersion.is_valid(version_value):
-		discovery_errors.append("Invalid or missing mod version: %s"%[path])
+	if typeof(version_value) != TYPE_STRING or not ModVersion.is_valid(version_value):
+		discovery_errors.append("Invalid or missing mod version: %s" % path)
 		return null
 	
 	if typeof(game_version_value) != TYPE_STRING or not ModVersion.is_compatibility_line(game_version_value):
@@ -111,7 +111,7 @@ func _read_manifest(path: String, root_path: String) -> ModManifest:
 		discovery_errors.append("Invalid characters in mod ID '%s'."%[id])
 		return null
 	
-	var dependency_values:Variant = data.get("dependencies", [] if id == CORE_MOD_ID else [CORE_MOD_ID])
+	var dependency_values: Variant = data.get("dependencies", [])
 	if typeof(dependency_values) != TYPE_ARRAY:
 		discovery_errors.append("Dependencies must be an Array: %s."%[path])
 		return null
@@ -141,7 +141,7 @@ func _read_manifest(path: String, root_path: String) -> ModManifest:
 	return manifest
 
 
-func _get_available_mods() -> Array[ModManifest]:
+func get_available_mods() -> Array[ModManifest]:
 	var result: Array[ModManifest] = []
 	
 	for manifest in _manifests.values():
@@ -225,7 +225,7 @@ func resolve(requested_ids: Array[String]) -> Array[ModManifest]:
 	
 	ordered.sort_custom(func(a: ModManifest, b: ModManifest) -> bool:
 		if depths[a.id] != depths[b.id]:
-			return depths[a.id] != depths[b.id]
+			return depths[a.id] < depths[b.id]
 		return a.id.naturalcasecmp_to(b.id) < 0
 	)
 	
@@ -241,10 +241,15 @@ func _validate_dependency(manifest: ModManifest, dependency: ModDependency,
 			resolution_errors.append("Mod '%s' is incompatible with '%s'."%[manifest.id, dependency.id])
 		return
 	
+	if not exists:
+		if dependency.is_required():
+			resolution_errors.append("Mod '%s' requires '%s'." % [manifest.id, dependency.id])
+		return
+		
 	var target := _manifests[dependency.id]
 	
 	if not ModVersion.satisfies(target.version, dependency.operator, dependency.version):
-		resolution_errors.append("Mod '%s' requires '%s %s %s', but found %s."%[
+		resolution_errors.append("Mod '%s' requires '%s %s %s', but found %s." % [
 			manifest.id, dependency.id, dependency.operator, dependency.version, target.version
 		])
 
@@ -268,7 +273,7 @@ func _calculate_depth(id: String, enabled: Dictionary[String, bool], states: Dic
 	var depth := 0
 	var manifest := _manifests[id]
 	
-	for dependency:ModDependency in manifest.dependecies:
+	for dependency:ModDependency in manifest.dependencies:
 		if not dependency.affects_load_order() or not enabled.has(dependency.id):
 			continue
 		
@@ -277,6 +282,13 @@ func _calculate_depth(id: String, enabled: Dictionary[String, bool], states: Dic
 			return -1
 		
 		depth = maxi(depth, dependency_depth + 1)
+	
+	if id != CORE_MOD_ID:
+		var core_depth := _calculate_depth(CORE_MOD_ID, enabled, states, depths, chain)
+		if core_depth < 0:
+			return -1
+
+		depth = maxi(depth, core_depth + 1)
 		
 	chain.pop_back()
 	states[id] = RESOLVED
