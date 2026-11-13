@@ -1,7 +1,7 @@
 @tool
 class_name ModManager extends RefCounted
 
-const BUILTIN_MODS_PATH := "res://mod"
+const BUILTIN_MODS_PATH := "res://mods"
 const USER_MODS_PATH := "user://game/mods"
 const MANIFEST_FILE_NAME := "manifest.json"
 const CORE_MOD_ID := "core"
@@ -58,6 +58,12 @@ func _scan_root(root_path: String) -> void:
 		
 		var manifest := _read_manifest(manifest_path, mod_path)
 		if manifest == null:
+			continue
+		
+		var expected_folder := "%s_%s" % [manifest.id, manifest.version]
+		# mod folder's name should either be {mod-id} or {mod-id}_{mod-version}
+		if folder_name != manifest.id and folder_name != expected_folder:
+			discovery_errors.append("Invalid folder name '%s'. Expected '%s' or '%s'." % [folder_name, manifest.id, expected_folder])
 			continue
 		
 		if manifest.id == CORE_MOD_ID and root_path != builtin_mods_path:

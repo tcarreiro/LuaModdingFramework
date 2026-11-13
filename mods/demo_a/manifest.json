@@ -3,5 +3,5 @@
 	"version": "0.1.0",
 	"display_name": "Demo A",
 	"game_version": "0.1",
-	"dependencies": ["core >= 0.1.0"]
+	"dependencies": []
 }
