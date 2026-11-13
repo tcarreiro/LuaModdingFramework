@@ -60,6 +60,12 @@ func _scan_root(root_path: String) -> void:
 		if manifest == null:
 			continue
 		
+		var expected_folder := "%s_%s" % [manifest.id, manifest.version]
+		# mod folder's name should either be {mod-id} or {mod-id}_{mod-version}
+		if folder_name != manifest.id and folder_name != expected_folder:
+			discovery_errors.append("Invalid folder name '%s'. Expected '%s' or '%s'." % [folder_name, manifest.id, expected_folder])
+			continue
+		
 		if manifest.id == CORE_MOD_ID and root_path != builtin_mods_path:
 			discovery_errors.append("The core mod cannot be loaded from user://mods.")
 			continue
