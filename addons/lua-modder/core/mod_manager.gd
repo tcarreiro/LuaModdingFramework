@@ -1,7 +1,7 @@
 @tool
 class_name ModManager extends RefCounted
 
-const BUILTIN_MODS_PATH := "res://mod"
+const BUILTIN_MODS_PATH := "res://mods"
 const USER_MODS_PATH := "user://game/mods"
 const MANIFEST_FILE_NAME := "manifest.json"
 const CORE_MOD_ID := "core"
@@ -99,7 +99,7 @@ func _read_manifest(path: String, root_path: String) -> ModManifest:
 		discovery_errors.append("Invalid or missing mod ID: %s"%[path])
 		return null
 	
-	if typeof(version_value) != TYPE_STRING or ModVersion.is_valid(version_value):
+	if typeof(version_value) != TYPE_STRING or not ModVersion.is_valid(version_value):
 		discovery_errors.append("Invalid or missing mod version: %s"%[path])
 		return null
 	
@@ -141,7 +141,7 @@ func _read_manifest(path: String, root_path: String) -> ModManifest:
 	return manifest
 
 
-func _get_available_mods() -> Array[ModManifest]:
+func get_available_mods() -> Array[ModManifest]:
 	var result: Array[ModManifest] = []
 	
 	for manifest in _manifests.values():
