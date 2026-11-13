@@ -250,3 +250,33 @@ func test_missing_core() -> void:
 	assert_true(manager.discovery_errors.size() > 0)
 	assert_true(manager.resolution_errors.size() > 0)
 	assert_true(ordered.is_empty())
+
+
+func test_versioned_mod_folder() -> void:
+	_create_mod("demo_a")
+
+	var original_path := _builtin_path.path_join("demo_a")
+	var versioned_path := _builtin_path.path_join("demo_a_1.0.0")
+	var error := DirAccess.rename_absolute(ProjectSettings.globalize_path(original_path), ProjectSettings.globalize_path(versioned_path))
+
+	assert_eq(error, OK)
+
+	var manager := _discover_manager()
+
+	assert_eq(manager.discovery_errors.size(), 0)
+	assert_not_null(manager.get_manifest("demo_a"))
+
+
+func test_invalid_mod_folder_name() -> void:
+	_create_mod("demo_a")
+
+	var original_path := _builtin_path.path_join("demo_a")
+	var invalid_path := _builtin_path.path_join("wrong_name")
+	var error := DirAccess.rename_absolute(ProjectSettings.globalize_path(original_path), ProjectSettings.globalize_path(invalid_path))
+
+	assert_eq(error, OK)
+
+	var manager := _discover_manager()
+
+	assert_true(manager.discovery_errors.size() > 0)
+	assert_null(manager.get_manifest("demo_a"))

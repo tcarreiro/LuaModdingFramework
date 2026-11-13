@@ -26,10 +26,6 @@ func _populate_mods() -> void:
 		checkbox.tooltip_text = manifest.description
 		checkbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-		if manifest.id == ModManager.CORE_MOD_ID:
-			checkbox.button_pressed = true
-			checkbox.disabled = true
-
 		checkbox.toggled.connect(_on_mod_toggled.bind(manifest.id))
 		mods_list.add_child(checkbox)
 
@@ -55,23 +51,23 @@ func _on_mod_toggled(pressed: bool, id: String) -> void:
 func _refresh_selection() -> void:
 	var resolved_mods := GameMods.mod_manager.resolve(_explicit_selected_ids)
 	var resolved_ids: Dictionary[String, bool] = {}
-	
+
 	for manifest in resolved_mods:
 		resolved_ids[manifest.id] = true
-	
+
 	var has_errors := not GameMods.mod_manager.resolution_errors.is_empty()
-	
+
 	for id in _checkboxes:
 		var checkbox := _checkboxes[id]
 		var is_explicit := _explicit_selected_ids.has(id)
 		var is_resolved := resolved_ids.has(id)
-		var is_core := ModManager.CORE_MOD_ID
-		
+		var is_core := id == ModManager.CORE_MOD_ID
+
 		var should_be_checked := is_explicit or is_resolved or is_core
-		
+
 		checkbox.set_pressed_no_signal(should_be_checked)
 		checkbox.disabled = is_core or (not has_errors and is_resolved and not is_explicit)
-	
+
 	if has_errors:
 		_show_resolution_errors()
 	else:
