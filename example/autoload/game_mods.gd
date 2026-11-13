@@ -5,7 +5,7 @@ var mod_manager: ModManager
 var selected_mods: Array[ModManifest] = []
 
 func _ready() -> void:
-	mod_manager = ModManager.new(GAME_VERSION)
+	mod_manager = ModManager.new(GAME_VERSION, "res://example/mods")
 	mod_manager.discover()
 	
 	for error in mod_manager.discovery_errors:
