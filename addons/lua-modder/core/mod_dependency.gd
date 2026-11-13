@@ -35,14 +35,19 @@ static func parse(raw: String) -> ModDependency:
 	
 	if source.begins_with("(?)"):
 		dependency.type = Type.HIDDEN_OPTIONAL
+		source = source.substr(3).strip_edges()
 	elif source.begins_with("?"):
 		dependency.type = Type.OPTIONAL
+		source = source.substr(1).strip_edges()
 	elif source.begins_with("+"):
 		dependency.type = Type.RECOMMENDED
+		source = source.substr(1).strip_edges()
 	elif source.begins_with("!"):
 		dependency.type = Type.INCOMPATIBLE
+		source = source.substr(1).strip_edges()
 	elif source.begins_with("~"):
 		dependency.type = Type.NO_ORDER
+		source = source.substr(1).strip_edges()
 	
 	var regex := RegEx.new()
 	regex.compile("^([A-Za-z0-9_-]+)(?:\\s*(<=|>=|=|<|>)\\s*(\\d+\\.\\d+\\.\\d+))?$")
