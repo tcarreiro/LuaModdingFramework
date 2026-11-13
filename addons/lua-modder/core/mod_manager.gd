@@ -274,7 +274,7 @@ func _calculate_depth(id: String, enabled: Dictionary[String, bool], states: Dic
 	var depth := 0
 	var manifest := _manifests[id]
 	
-	for dependency:ModDependency in manifest.dependecies:
+	for dependency:ModDependency in manifest.dependencies:
 		if not dependency.affects_load_order() or not enabled.has(dependency.id):
 			continue
 		

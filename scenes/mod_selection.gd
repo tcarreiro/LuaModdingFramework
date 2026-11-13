@@ -7,6 +7,7 @@ extends MarginContainer
 @onready var feedback: Label = %Feedback
 
 var _checkboxes: Dictionary[String, CheckBox] = {}
+var _explicit_selected_ids: Array[String] = []
 
 func _ready() -> void:
 	clear_button.pressed.connect(_on_clear_pressed)
@@ -29,43 +30,67 @@ func _populate_mods() -> void:
 			checkbox.button_pressed = true
 			checkbox.disabled = true
 
-		checkbox.toggled.connect(_on_mod_toggled)
+		checkbox.toggled.connect(_on_mod_toggled.bind(manifest.id))
 		mods_list.add_child(checkbox)
 
 		_checkboxes[manifest.id] = checkbox
 
 	if available_mods.is_empty():
 		feedback.text = "Nenhum mod encontrado."
+		return
+	
+	_refresh_selection()
 
 
-func _on_mod_toggled(_pressed: bool) -> void:
-	feedback.text = ""
+func _on_mod_toggled(pressed: bool, id: String) -> void:
+	if pressed:
+		if not _explicit_selected_ids.has(id):
+			_explicit_selected_ids.append(id)
+	else:
+		_explicit_selected_ids.erase(id)
+	
+	_refresh_selection()
+
+
+func _refresh_selection() -> void:
+	var resolved_mods := GameMods.mod_manager.resolve(_explicit_selected_ids)
+	var resolved_ids: Dictionary[String, bool] = {}
+	
+	for manifest in resolved_mods:
+		resolved_ids[manifest.id] = true
+	
+	var has_errors := not GameMods.mod_manager.resolution_errors.is_empty()
+	
+	for id in _checkboxes:
+		var checkbox := _checkboxes[id]
+		var is_explicit := _explicit_selected_ids.has(id)
+		var is_resolved := resolved_ids.has(id)
+		var is_core := ModManager.CORE_MOD_ID
+		
+		var should_be_checked := is_explicit or is_resolved or is_core
+		
+		checkbox.set_pressed_no_signal(should_be_checked)
+		checkbox.disabled = is_core or (not has_errors and is_resolved and not is_explicit)
+	
+	if has_errors:
+		_show_resolution_errors()
+	else:
+		feedback.text = ""
 
 
 func _on_clear_pressed() -> void:
-	for id in _checkboxes:
-		if id == ModManager.CORE_MOD_ID:
-			continue
-
-		_checkboxes[id].button_pressed = false
-
-	feedback.text = "Seleção limpa."
+	_explicit_selected_ids.clear()
+	_refresh_selection()
+	
+	if GameMods.mod_manager.resolution_errors.is_empty():
+		feedback.text = "Seleção limpa."
 
 
 func _on_ok_pressed() -> void:
-	var selected_ids: Array[String] = []
-
-	for id in _checkboxes:
-		if id == ModManager.CORE_MOD_ID:
-			continue
-
-		if _checkboxes[id].button_pressed:
-			selected_ids.append(id)
-
-	if not GameMods.prepare_new_game(selected_ids):
+	if not GameMods.prepare_new_game(_explicit_selected_ids):
 		_show_resolution_errors()
 		return
-
+	
 	var resolved_ids: Array[String] = []
 
 	for manifest in GameMods.selected_mods:
@@ -74,6 +99,7 @@ func _on_ok_pressed() -> void:
 	feedback.text = "Mods preparados: %s" % ", ".join(PackedStringArray(resolved_ids))
 
 	print("[ModSelection] Mods prepared successfully:")
+	
 	for manifest in GameMods.selected_mods:
 		print(" - %s (%s)" % [manifest.id, manifest.version])
 
