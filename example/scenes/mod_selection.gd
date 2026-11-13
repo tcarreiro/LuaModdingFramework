@@ -1,4 +1,3 @@
-
 extends MarginContainer
 
 @onready var mods_list: VBoxContainer = %ModsList
@@ -18,7 +17,7 @@ func _ready() -> void:
 func _populate_mods() -> void:
 	_checkboxes.clear()
 
-	var available_mods := GameMods.get_available_mods()
+	var available_mods: Array[ModManifest] = GameMods.get_available_mods()
 
 	for manifest in available_mods:
 		var checkbox := CheckBox.new()
@@ -49,13 +48,13 @@ func _on_mod_toggled(pressed: bool, id: String) -> void:
 
 
 func _refresh_selection() -> void:
-	var resolved_mods := GameMods.mod_manager.resolve(_explicit_selected_ids)
+	var resolved_mods: Array[ModManifest] = GameMods.mod_manager.resolve(_explicit_selected_ids)
 	var resolved_ids: Dictionary[String, bool] = {}
 
 	for manifest in resolved_mods:
 		resolved_ids[manifest.id] = true
 
-	var has_errors := not GameMods.mod_manager.resolution_errors.is_empty()
+	var has_errors: bool = not GameMods.mod_manager.resolution_errors.is_empty()
 
 	for id in _checkboxes:
 		var checkbox := _checkboxes[id]
@@ -101,5 +100,5 @@ func _on_ok_pressed() -> void:
 
 
 func _show_resolution_errors() -> void:
-	var errors := GameMods.mod_manager.resolution_errors
+	var errors: Array[String] = GameMods.mod_manager.resolution_errors
 	feedback.text = "Erro ao preparar os mods:\n%s" % "\n".join(PackedStringArray(errors))
