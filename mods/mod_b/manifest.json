@@ -1,0 +1,7 @@
+{
+	"id":"demo_b",
+	"version": "0.1.0",
+	"display_name": "Demo B",
+	"game_version": "0.1",
+	"dependencies": ["demo_a >= 0.1.0"]
+}
