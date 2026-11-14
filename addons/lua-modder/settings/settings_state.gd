@@ -21,6 +21,10 @@ const ARRAY_FIELDS := [
 	ModSetting.ALLOWED_VALUES,
 ]
 
+const COLOR_FIELDS := [
+	ModSetting.DEFAULT_VALUE, ModSetting.FORCED_VALUE,
+]
+
 var errors: Array[String] = []
 
 var _lua_state: LuaState
@@ -41,6 +45,7 @@ func start() -> void:
 	
 	var settings_api := _lua_state.create_table()
 	settings_api["define"] = _lua_state.create_function(_lua_define)
+	settings_api["get"] = _lua_state.create_function(_lua_get)
 	settings_api["update"] = _lua_state.create_function(_lua_update)
 	settings_api["force"] = _lua_state.create_function(_lua_force)
 	
@@ -49,6 +54,27 @@ func start() -> void:
 
 func is_active() -> bool:
 	return _lua_state != null
+
+
+
+func get_errors() -> Array[String]:
+	var result: Array[String] = []
+	result.append_array(errors)
+
+	if _registry != null:
+		result.append_array(_registry.errors)
+
+	return result
+
+
+func get_warnings() -> Array[String]:
+	var result: Array[String] = []
+
+	if _registry != null:
+		result.append_array(_registry.warnings)
+
+	return result
+
 
 
 func execute(source: String, mod_id: String, chunk_name: String = "") -> bool:
@@ -94,65 +120,114 @@ func close() -> void:
 	_current_mod_id = ""
 
 
-func _lua_define(definition: Variant) -> bool:
-	var data: Variant = _read_table(definition)
-	if data == null:
+
+func define_from_json(definition: Dictionary, mod_id: String) -> bool:
+	if not is_active():
+		errors.append("SettingsState is not active.")
 		return false
-	
-	var value_type:Variant = data.get(ModSetting.VALUE_TYPE, ModSetting.STRING)
+
+	if mod_id.strip_edges().is_empty():
+		errors.append("Cannot define settings without a mod ID.")
+		return false
+
+	var previous_mod_id := _current_mod_id
+	_current_mod_id = mod_id
+
+	var result := _define_setting(definition.duplicate(true))
+
+	_current_mod_id = previous_mod_id
+	return result
+
+
+func _lua_define(definition: Variant) -> bool:
+	var data: Variant = LuaUtils.read_table(definition)
+	if data == null:
+		errors.append("Expected a Lua table.")
+		return false
+
+	return _define_setting(data)
+
+
+func _define_setting(data: Dictionary) -> bool:
+	var value_type: Variant = data.get(ModSetting.VALUE_TYPE, ModSetting.STRING)
 	if typeof(value_type) != TYPE_STRING:
 		errors.append("Invalid value_type in setting definition.")
 		return false
-	
-	_normalize_fields(data, value_type)
-	
+
+	LuaUtils.normalize_fields(data, ARRAY_FIELDS, COLOR_FIELDS if value_type == ModSetting.COLOR else [])
+
 	var setting := ModSetting.new()
-	
+
 	for field in data:
 		if not DEFINITION_FIELDS.has(field):
 			errors.append("Unknown property '%s' in setting definition." % str(field))
 			return false
-	
+
 		var value: Variant = data[field]
-		
+
 		if STRING_FIELDS.has(field) and typeof(value) != TYPE_STRING:
 			errors.append("Property '%s' must be a string." % field)
 			return false
-		
+
 		if BOOL_FIELDS.has(field) and typeof(value) != TYPE_BOOL:
 			errors.append("Property '%s' must be a boolean." % field)
 			return false
-		
+
 		if ARRAY_FIELDS.has(field) and typeof(value) != TYPE_ARRAY:
 			errors.append("Property '%s' must be an array." % field)
 			return false
-		
+
 		setting.set(field, value)
-	
+
 	return _registry.register(setting, _current_mod_id)
+
+
+
+func _lua_get(id: Variant) -> Variant:
+	if typeof(id) != TYPE_STRING:
+		errors.append("Setting ID must be a string.")
+		return null
+
+	var setting := _registry.get_setting(id)
+	if setting == null:
+		return null
+
+	var data := {}
+
+	for field in DEFINITION_FIELDS:
+		var value: Variant = setting.get(field)
+		if value != null:
+			data[field] = value
+
+	data["owner_mod_id"] = setting.owner_mod_id
+
+	return LuaUtils.to_lua_value(_lua_state, data)
+
 
 func _lua_update(id: Variant, changes: Variant) -> bool:
 	if typeof(id) != TYPE_STRING:
 		errors.append("Setting ID must be a string.")
 		return false
-	
-	var data: Variant = _read_table(changes)
+
+	var data: Variant = LuaUtils.read_table(changes)
 	if data == null:
+		errors.append("Expected a Lua table.")
 		return false
-	
+
 	var setting := _registry.get_setting(id)
 	if setting == null:
 		errors.append("Setting '%s' does not exist." % id)
 		return false
-	
+
 	var value_type: Variant = data.get(ModSetting.VALUE_TYPE, setting.value_type)
 	if typeof(value_type) != TYPE_STRING:
 		errors.append("Invalid value_type when updating '%s'." % id)
 		return false
-	
-	_normalize_fields(data, value_type)
-	
+
+	LuaUtils.normalize_fields(data, ARRAY_FIELDS, COLOR_FIELDS if value_type == ModSetting.COLOR else [])
+
 	return _registry.update(id, data, _current_mod_id)
+
 
 
 func _lua_force(id: Variant, value: Variant) -> bool:
@@ -166,53 +241,7 @@ func _lua_force(id: Variant, value: Variant) -> bool:
 		return false
 	
 	if setting.value_type == ModSetting.COLOR:
-		value = _convert_color(value)
+		value = LuaUtils.convert_color(value)
 	
 	return _registry.force(id, value, _current_mod_id)
 	
-
-
-func _read_table(value: Variant) -> Variant:
-	if not value is LuaTable:
-		errors.append("Expected a Lua Table.")
-		return null
-	return value.to_dictionary()
-
-
-func _normalize_fields(data: Dictionary, value_type: String) -> void:
-	if data.has(ModSetting.ALLOWED_VALUES) and data[ModSetting.ALLOWED_VALUES] is LuaTable:
-		data[ModSetting.ALLOWED_VALUES] = data[ModSetting.ALLOWED_VALUES].to_array()
-	
-	if value_type == ModSetting.COLOR:
-		if data.has(ModSetting.DEFAULT_VALUE):
-			data[ModSetting.DEFAULT_VALUE] = _convert_color(data[ModSetting.DEFAULT_VALUE])
-			
-		if data.has(ModSetting.FORCED_VALUE):
-			data[ModSetting.FORCED_VALUE] = _convert_color(data[ModSetting.FORCED_VALUE])
-
-
-func _convert_color(value: Variant) -> Variant:
-	if not value is LuaTable:
-		return value
-	
-	var data = value.to_dictionary()
-	for field in ["r", "g", "b"]:
-		if not data.has(field):
-			return value
-		
-		if typeof(data[field]) != TYPE_FLOAT and typeof(data[field]) != TYPE_INT:
-			return value
-	
-	var alpha: Variant = data.get("a", 1.0)
-	if typeof(alpha) != TYPE_FLOAT and typeof(alpha) != TYPE_INT:
-		return value
-	
-	return Color(float(data["r"]), float(data["g"]), float(data["b"]), float(alpha))
-
-
-
-
-
-
-
-#
