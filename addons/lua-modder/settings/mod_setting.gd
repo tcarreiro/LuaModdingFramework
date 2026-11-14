@@ -28,7 +28,7 @@ const MAXIMUM_VALUE := "maximum_value"
 const ALLOW_BLANK := "allow_blank"
 const HIDDEN := "hidden"
 
-const VALUE_TYPES := ["bool", "int", "double", "string", "color"]
+const VALUE_TYPES := [BOOL, INT, DOUBLE, STRING, COLOR]
 # scope is for future-proof. Not in use right now
 const SCOPES := ["startup", "runtime-global", "runtime-per-user"]
 # startup: defined before game session and is immutable
@@ -40,7 +40,7 @@ var display_name: String
 var description: String = ""
 var order: String = ""
 
-var value_type: String = "string"
+var value_type: String = STRING
 var scope: String = "startup"
 
 var default_value: Variant = null
@@ -76,11 +76,11 @@ func validate() -> String:
 	if not SCOPES.has(scope):
 		return "Invalid setting scope '%s'."%scope
 	
-	if value_type != "int" and value_type != "double":
+	if value_type != INT and value_type != DOUBLE:
 		if minimum_value != null or maximum_value != null:
 			return "Minimum and Maximum values are only supported for numeric settings."
 	
-	if value_type != "int" and value_type != "double" and value_type != "string":
+	if value_type != INT and value_type != DOUBLE and value_type != STRING:
 		if not allowed_values.is_empty():
 			return "Allowed values are not supported for '%s' settings."%value_type
 	
@@ -118,15 +118,15 @@ func validate_value(value: Variant, check_allowed_values: bool = true) -> String
 	if not _matches_type(value):
 		return "Expected '%s' value."%value_type
 	
-	if value_type == "string" and not allow_blank:
+	if value_type == STRING and not allow_blank:
 		if String(value).strip_edges().is_empty():
 			return "Blank strings are not allowed."
 	
-	if value_type == "int" or value_type == "double":
+	if value_type == INT or value_type == DOUBLE:
 		if minimum_value != null and float(value) < float(minimum_value):
 			return "Value is below the minimum."
 	
-	if value_type == "int" or value_type == "double":
+	if value_type == INT or value_type == DOUBLE:
 		if maximum_value != null and float(value) > float(maximum_value):
 			return "Value exceeds the maximum."
 	
@@ -139,15 +139,15 @@ func validate_value(value: Variant, check_allowed_values: bool = true) -> String
 
 func _matches_type(value: Variant) -> bool:
 	match value_type:
-		"bool":
+		BOOL:
 			return typeof(value) == TYPE_BOOL
-		"int":
+		INT:
 			return typeof(value) == TYPE_INT
-		"double":
+		DOUBLE:
 			return typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT
-		"string":
+		STRING:
 			return typeof(value) == TYPE_STRING
-		"color":
+		COLOR:
 			return typeof(value) == TYPE_COLOR
 	return false
 
@@ -160,34 +160,5 @@ func clone() -> ModSetting:
 			result.set(prop.name, get(prop.name).duplicate(true))
 		else:
 			result.set(prop.name, get(prop.name))
-	#result.id = id
-	#result.display_name = display_name
-	#result.description = description
-	#result.order = order
-	#result.value_type = value_type
-	#result.scope = scope
-	#result.default_value = default_value
-	# etc
 	
 	return result
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#

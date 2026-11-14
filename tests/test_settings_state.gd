@@ -205,3 +205,21 @@ func test_finish_disposes_lua_state() -> void:
 	assert_not_null(registry)
 	assert_false(settings_state.is_active())
 	assert_false(settings_state.execute("return 1", "mod_a"))
+
+
+func test_lua_utils_array_conversion() -> void:
+	var lua_state := LuaState.new()
+	lua_state.open_libraries(LuaState.LUA_BASE)
+
+	var values = LuaUtils.to_lua_value(lua_state, ["slow", "normal", "fast"])
+	lua_state.globals["values"] = values
+
+	var result = lua_state.do_string("""
+		return values[1] == "slow"
+			and values[2] == "normal"
+			and values[3] == "fast"
+			and #values == 3
+	""")
+
+	assert_eq(result, true)
+	

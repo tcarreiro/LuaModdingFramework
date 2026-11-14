@@ -34,6 +34,7 @@ func _populate_mods() -> void:
 		feedback.text = "Nenhum mod encontrado."
 		return
 	
+	_explicit_selected_ids = GameMods.selected_mod_ids.duplicate()
 	_refresh_selection()
 
 
@@ -81,22 +82,17 @@ func _on_clear_pressed() -> void:
 		feedback.text = "Seleção limpa."
 
 
+
+
 func _on_ok_pressed() -> void:
 	if not GameMods.prepare_new_game(_explicit_selected_ids):
-		_show_resolution_errors()
+		feedback.text = "Erro ao preparar o jogo:\n%s" % "\n".join(PackedStringArray(GameMods.prepare_errors))
 		return
-	
-	var resolved_ids: Array[String] = []
 
-	for manifest in GameMods.selected_mods:
-		resolved_ids.append(manifest.id)
+	for warning in GameMods.prepare_warnings:
+		push_warning("[SettingsStage] %s" % warning)
 
-	feedback.text = "Mods preparados: %s" % ", ".join(PackedStringArray(resolved_ids))
-
-	print("[ModSelection] Mods prepared successfully:")
-	
-	for manifest in GameMods.selected_mods:
-		print(" - %s (%s)" % [manifest.id, manifest.version])
+	get_tree().change_scene_to_file("res://example/scenes/new_game_settings.tscn")
 
 
 func _show_resolution_errors() -> void:
