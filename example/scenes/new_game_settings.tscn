@@ -63,4 +63,3 @@ text = "Confirmar"
 [node name="Feedback" type="Label" parent="VBoxContainer" unique_id=2063366245]
 unique_name_in_owner = true
 layout_mode = 2
-autowrap_mode = 3
