@@ -1,0 +1,65 @@
+[gd_scene format=3 uid="uid://grld1stsw4h8"]
+
+[ext_resource type="Script" uid="uid://b71ae876xwfb4" path="res://example/scenes/new_game_settings.gd" id="1_1bwpj"]
+
+[node name="NewGameSettings" type="MarginContainer" unique_id=272680068]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 24
+script = ExtResource("1_1bwpj")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="." unique_id=1033449757]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="VBoxContainer" unique_id=1116065626]
+layout_mode = 2
+text = "Configurações do novo jogo"
+
+[node name="ActiveMods" type="Label" parent="VBoxContainer" unique_id=749855500]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="ScrollContainer" type="ScrollContainer" parent="VBoxContainer" unique_id=937850500]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="SettingsList" type="VBoxContainer" parent="VBoxContainer/ScrollContainer" unique_id=1414837937]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="Actions" type="HBoxContainer" parent="VBoxContainer" unique_id=1471893506]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BackButton" type="Button" parent="VBoxContainer/Actions" unique_id=414930601]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Voltar"
+
+[node name="Spacer" type="Control" parent="VBoxContainer/Actions" unique_id=498040229]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ResetButton" type="Button" parent="VBoxContainer/Actions" unique_id=1402134326]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Restaurar padrões"
+
+[node name="ConfirmButton" type="Button" parent="VBoxContainer/Actions" unique_id=1981398042]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Confirmar"
+
+[node name="Feedback" type="Label" parent="VBoxContainer" unique_id=2063366245]
+unique_name_in_owner = true
+layout_mode = 2
