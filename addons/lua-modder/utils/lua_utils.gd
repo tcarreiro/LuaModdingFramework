@@ -10,7 +10,8 @@ static func read_table(value: Variant) -> Variant:
 	return value.to_dictionary()
 
 
-static func normalize_fields(data: Dictionary, array_fields: Array, color_fields: Array = []) -> void:
+
+static func normalize_fields(data: Dictionary, array_fields: Array, color_fields: Array = [], integer_fields: Array = []) -> void:
 	for field in array_fields:
 		if data.has(field) and data[field] is LuaTable:
 			data[field] = data[field].to_array()
@@ -18,6 +19,33 @@ static func normalize_fields(data: Dictionary, array_fields: Array, color_fields
 	for field in color_fields:
 		if data.has(field):
 			data[field] = convert_color(data[field])
+
+	for field in integer_fields:
+		if not data.has(field):
+			continue
+
+		var value: Variant = data[field]
+
+		if value is Array:
+			for i in range(value.size()):
+				value[i] = normalize_integer(value[i])
+		else:
+			data[field] = normalize_integer(value)
+
+
+static func normalize_integer(value: Variant) -> Variant:
+	if typeof(value) != TYPE_FLOAT:
+		return value
+
+	var number: float = value
+
+	if not is_finite(number) or number != floorf(number):
+		return value
+
+	if absf(number) > 9007199254740991.0:
+		return value
+
+	return int(number)
 
 
 static func convert_color(value: Variant) -> Variant:

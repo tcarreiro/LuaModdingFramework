@@ -25,6 +25,12 @@ const COLOR_FIELDS := [
 	ModSetting.DEFAULT_VALUE, ModSetting.FORCED_VALUE,
 ]
 
+const INTEGER_FIELDS := [
+	ModSetting.DEFAULT_VALUE, ModSetting.FORCED_VALUE,
+	ModSetting.MINIMUM_VALUE, ModSetting.MAXIMUM_VALUE,
+	ModSetting.ALLOWED_VALUES,
+]
+
 var errors: Array[String] = []
 
 var _lua_state: LuaState
@@ -120,7 +126,6 @@ func close() -> void:
 	_current_mod_id = ""
 
 
-
 func define_from_json(definition: Dictionary, mod_id: String) -> bool:
 	if not is_active():
 		errors.append("SettingsState is not active.")
@@ -154,8 +159,10 @@ func _define_setting(data: Dictionary) -> bool:
 		errors.append("Invalid value_type in setting definition.")
 		return false
 
-	LuaUtils.normalize_fields(data, ARRAY_FIELDS, COLOR_FIELDS if value_type == ModSetting.COLOR else [])
-
+	var color_fields := COLOR_FIELDS if value_type == ModSetting.COLOR else []
+	var integer_fields := INTEGER_FIELDS if value_type == ModSetting.INT else []
+	LuaUtils.normalize_fields(data, ARRAY_FIELDS, color_fields, integer_fields)
+	
 	var setting := ModSetting.new()
 
 	for field in data:
@@ -218,16 +225,17 @@ func _lua_update(id: Variant, changes: Variant) -> bool:
 	if setting == null:
 		errors.append("Setting '%s' does not exist." % id)
 		return false
-
+	
 	var value_type: Variant = data.get(ModSetting.VALUE_TYPE, setting.value_type)
 	if typeof(value_type) != TYPE_STRING:
 		errors.append("Invalid value_type when updating '%s'." % id)
 		return false
-
-	LuaUtils.normalize_fields(data, ARRAY_FIELDS, COLOR_FIELDS if value_type == ModSetting.COLOR else [])
+	
+	var color_fields := COLOR_FIELDS if value_type == ModSetting.COLOR else []
+	var integer_fields := INTEGER_FIELDS if value_type == ModSetting.INT else []
+	LuaUtils.normalize_fields(data, ARRAY_FIELDS, color_fields, integer_fields)
 
 	return _registry.update(id, data, _current_mod_id)
-
 
 
 func _lua_force(id: Variant, value: Variant) -> bool:
@@ -242,6 +250,8 @@ func _lua_force(id: Variant, value: Variant) -> bool:
 	
 	if setting.value_type == ModSetting.COLOR:
 		value = LuaUtils.convert_color(value)
+	elif setting.value_type == ModSetting.INT:
+		value = LuaUtils.normalize_integer(value)
 	
 	return _registry.force(id, value, _current_mod_id)
 	

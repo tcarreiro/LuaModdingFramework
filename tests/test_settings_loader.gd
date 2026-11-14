@@ -337,3 +337,54 @@ func test_new_run_creates_new_registry() -> void:
 
 	assert_false(second_registry.has_setting("enemy_speed"))
 	assert_true(first_registry.has_setting("enemy_speed"))
+
+
+
+func test_integer_normalization_from_json_and_lua() -> void:
+	_create_mod("demo_a")
+
+	var definitions := [{
+		"id": "enemy_count",
+		"value_type": "int",
+		"default_value": 10,
+		"minimum_value": 0,
+		"maximum_value": 100,
+		"allowed_values": [10, 25, 50]
+	}]
+
+	_write_file("core", "settings.json", JSON.stringify(definitions))
+
+	_write_file("demo_a", "settings-updates.lua", """
+		Settings.update("enemy_count", {
+			default_value = 25
+		})
+	""")
+
+	_write_file("demo_a", "settings-final-fixes.lua", """
+		Settings.force("enemy_count", 50)
+	""")
+
+	var loader := SettingsLoader.new()
+	var registry := loader.run(_resolve_mods(["demo_a"]))
+
+	assert_not_null(registry)
+	assert_eq(loader.errors.size(), 0)
+
+	if registry == null:
+		return
+
+	var setting := registry.get_setting("enemy_count")
+
+	assert_eq(typeof(setting.default_value), TYPE_INT)
+	assert_eq(typeof(setting.minimum_value), TYPE_INT)
+	assert_eq(typeof(setting.maximum_value), TYPE_INT)
+	assert_eq(typeof(setting.forced_value), TYPE_INT)
+
+	assert_eq(setting.default_value, 25)
+	assert_eq(setting.minimum_value, 0)
+	assert_eq(setting.maximum_value, 100)
+	assert_eq(setting.allowed_values, [10, 25, 50])
+
+	assert_true(setting.hidden)
+	assert_eq(setting.get_effective_value(), 50)
+	assert_eq(setting.forced_by_mod_id, "demo_a")
