@@ -2,9 +2,9 @@
 class_name ModSettingsRegistry extends RefCounted
 
 const EDITABLE_FIELDS := [
-	"display_name", "description", "order", "value_type", "scope", "default_value",
-	"forced_value", "allowed_values", "minimum_value", "maximum_value", "allow_blank",
-	"hidden",
+	ModSetting.DISPLAY_NAME, ModSetting.DESCRIPTION, ModSetting.ORDER, ModSetting.VALUE_TYPE,
+	ModSetting.SCOPE, ModSetting.DEFAULT_VALUE, ModSetting.FORCED_VALUE, ModSetting.ALLOWED_VALUES,
+	ModSetting.MINIMUM_VALUE, ModSetting.MAXIMUM_VALUE, ModSetting.ALLOW_BLANK, ModSetting.HIDDEN,
 ]
 
 var errors: Array[String] = []
@@ -63,7 +63,7 @@ func update(id: String, changes: Dictionary, mod_id: String) -> bool:
 		
 		var value: Variant = changes[field]
 		
-		if field == "allowed_values":
+		if field == ModSetting.ALLOWED_VALUES:
 			if typeof(value) != TYPE_ARRAY:
 				errors.append("Property 'allowed_values' must be an Array.")
 				return false
@@ -71,19 +71,19 @@ func update(id: String, changes: Dictionary, mod_id: String) -> bool:
 			updated.allowed_values = value.duplicate(true)
 			continue
 		
-		if field == "hidden" or field == "allow_blank":
+		if field == ModSetting.HIDDEN or field == ModSetting.ALLOW_BLANK:
 			if typeof(value) != TYPE_BOOL:
 				errors.append("Property '%s' must be a boolean." % field)
 				return false
 		
-		if field in ["display_name", "description", "order", "value_type", "scope"]:
+		if field in [ModSetting.DISPLAY_NAME, ModSetting.DESCRIPTION, ModSetting.ORDER, ModSetting.VALUE_TYPE, ModSetting.SCOPE]:
 			if typeof(field) != TYPE_STRING:
 				errors.append("Property '%s' must be a string." % field)
 				return false
 		
 		updated.set(field, value)
 	
-	if changes.has("forced_value"):
+	if changes.has(ModSetting.FORCED_VALUE):
 		updated.forced_by_mod_id = mod_id if updated.is_forced() else ""
 	
 	updated.last_modified_by = mod_id
@@ -93,7 +93,7 @@ func update(id: String, changes: Dictionary, mod_id: String) -> bool:
 		errors.append("Cannot update setting '%s': '%s'" % [id, error])
 		return false
 	
-	if changes.has("forced_value") and current.is_forced() and updated.is_forced():
+	if changes.has(ModSetting.FORCED_VALUE) and current.is_forced() and updated.is_forced():
 		if current.forced_value != updated.forced_value and current.forced_by_mod_id != mod_id:
 			warnings.append("Setting '%s': mod '%s' overrides value forced by mod '%s'." % [
 				id, mod_id, current.forced_by_mod_id
@@ -104,7 +104,7 @@ func update(id: String, changes: Dictionary, mod_id: String) -> bool:
 
 
 func force(id: String, value: Variant, mod_id: String) -> bool:
-	return update(id, {"forced_value": value, "hidden": true}, mod_id)
+	return update(id, {ModSetting.FORCED_VALUE: value, ModSetting.HIDDEN: true}, mod_id)
 
 
 func has_setting(id: String) -> bool:
