@@ -1,6 +1,33 @@
 @tool
 class_name ModSetting extends RefCounted
 
+# Types
+const BOOL := "bool"
+const INT := "int"
+const DOUBLE := "double"
+const STRING := "string"
+const COLOR := "color"
+
+# Scopes
+const STARTUP := "startup"
+const RUNTIME_GLOBAL := "runtime-global"
+const RUNTIME_PER_USER := "runtime-per-user"
+
+# Properties
+const ID := "id"
+const DISPLAY_NAME := "display_name"
+const DESCRIPTION := "description"
+const ORDER := "order"
+const VALUE_TYPE := "value_type"
+const SCOPE := "scope"
+const DEFAULT_VALUE := "default_value"
+const FORCED_VALUE := "forced_value"
+const ALLOWED_VALUES := "allowed_values"
+const MINIMUM_VALUE := "minimum_value"
+const MAXIMUM_VALUE := "maximum_value"
+const ALLOW_BLANK := "allow_blank"
+const HIDDEN := "hidden"
+
 const VALUE_TYPES := ["bool", "int", "double", "string", "color"]
 # scope is for future-proof. Not in use right now
 const SCOPES := ["startup", "runtime-global", "runtime-per-user"]
