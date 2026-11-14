@@ -1,4 +1,4 @@
-extends Resource
+class_name ContentLoot extends Resource
 
 @export var id: String = ""
 @export var max_stack: int = 1

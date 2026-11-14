@@ -4,6 +4,9 @@ const LOOT_SCRIPT = preload("res://example/content/content_loot.gd")
 const STACK_SCRIPT = preload("res://example/content/content_item_stack.gd")
 const CONTAINER_SCRIPT = preload("res://example/content/content_container.gd")
 
+const PLAIN_STACK_SCRIPT = preload("res://example/content/content_plain_stack.gd")
+const PLAIN_CONTAINER_SCRIPT = preload("res://example/content/content_plain_container.gd")
+
 var registry: ContentTypeRegistry
 
 
@@ -154,3 +157,65 @@ func test_clear_registry() -> void:
 	assert_false(registry.has_type("loot"))
 	assert_false(registry.has_struct("item-stack"))
 	assert_eq(registry.errors.size(), 0)
+
+
+
+func test_resolve_struct_array_property() -> void:
+	registry.register_struct("item-stack", STACK_SCRIPT)
+	registry.register_type("item-container", CONTAINER_SCRIPT)
+
+	var binding := registry.get_struct_binding("item-container", "initial_items")
+
+	assert_eq(binding.get("struct_type"), "item-stack")
+	assert_eq(binding.get("is_array"), true)
+
+
+func test_struct_binding_requires_registered_struct() -> void:
+	registry.register_type("item-container", CONTAINER_SCRIPT)
+
+	var binding := registry.get_struct_binding("item-container", "initial_items")
+
+	assert_true(binding.is_empty())
+
+
+func test_primitive_property_has_no_struct_binding() -> void:
+	registry.register_type("item-container", CONTAINER_SCRIPT)
+
+	var binding := registry.get_struct_binding("item-container", "capacity")
+
+	assert_true(binding.is_empty())
+
+
+func test_explicit_struct_binding_without_class_name() -> void:
+	assert_true(registry.register_type("plain-container", PLAIN_CONTAINER_SCRIPT))
+	assert_true(registry.register_struct("plain-stack", PLAIN_STACK_SCRIPT))
+	assert_true(registry.register_struct_binding("plain-container", "initial_items", "plain-stack"))
+	assert_true(registry.validate_struct_bindings())
+
+	var binding := registry.get_struct_binding("plain-container", "initial_items")
+
+	assert_eq(binding["struct_type"], "plain-stack")
+	assert_true(binding["is_array"])
+
+
+func test_explicit_struct_binding_forward_reference() -> void:
+	registry.register_type("plain-container", PLAIN_CONTAINER_SCRIPT)
+
+	assert_true(registry.register_struct_binding("plain-container", "initial_items", "plain-stack"))
+
+	registry.register_struct("plain-stack", PLAIN_STACK_SCRIPT)
+
+	assert_true(registry.validate_struct_bindings())
+
+
+func test_explicit_struct_binding_unknown_target() -> void:
+	registry.register_type("plain-container", PLAIN_CONTAINER_SCRIPT)
+	registry.register_struct_binding("plain-container", "initial_items", "missing")
+
+	assert_false(registry.validate_struct_bindings())
+
+
+func test_explicit_struct_binding_rejects_primitive() -> void:
+	registry.register_type("plain-container", PLAIN_CONTAINER_SCRIPT)
+
+	assert_false(registry.register_struct_binding("plain-container", "id", "plain-stack"))
