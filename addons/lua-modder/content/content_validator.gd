@@ -1,4 +1,3 @@
-
 class_name ContentValidator extends RefCounted
 
 var errors: Array[String] = []

@@ -1,4 +1,3 @@
-
 extends GutTest
 
 const TEST_ROOT := "user://lua_modder_gut_tests"

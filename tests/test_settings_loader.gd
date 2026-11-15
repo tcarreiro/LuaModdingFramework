@@ -76,7 +76,7 @@ func _resolve_mods(ids: Array[String] = []) -> Array[ModManifest]:
 	return mods
 
 
-func test_empty_settings_stage() -> void:
+func test_empty_settings_state() -> void:
 	var loader := SettingsLoader.new()
 	var registry := loader.run(_resolve_mods())
 

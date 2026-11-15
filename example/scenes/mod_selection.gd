@@ -90,7 +90,7 @@ func _on_ok_pressed() -> void:
 		return
 
 	for warning in GameMods.prepare_warnings:
-		push_warning("[SettingsStage] %s" % warning)
+		push_warning("[SettingsState] %s" % warning)
 
 	get_tree().change_scene_to_file("res://example/scenes/new_game_settings.tscn")
 
