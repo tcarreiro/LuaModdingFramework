@@ -84,6 +84,10 @@ func _read_manifest(path: String, root_path: String) -> ModManifest:
 		discovery_errors.append("Cannot open manifest: %s"%[path])
 		return null
 	
+	if file.get_length() > 4 * 1024 * 1024:
+		discovery_errors.append("JSON file exceeds maximum allowed size: '%s'." % path)
+		return null
+	
 	var json:= JSON.new()
 	var error:= json.parse(file.get_as_text())
 	

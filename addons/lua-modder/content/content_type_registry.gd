@@ -7,15 +7,15 @@ const STRUCT := "struct"
 var errors: Array[String] = []
 var _registered: Dictionary[String, Dictionary] = {}
 
-func register_type(type_id: String, template_script: Script, validator: Callable = Callable()) -> bool:
-	return _register(type_id, template_script, validator, TEMPLATE)
+func register_type(type_id: String, template_script: Script, validator: Callable = Callable(), parent_type_id: String = "") -> bool:
+	return _register(type_id, template_script, validator, TEMPLATE, parent_type_id)
 
 
 func register_struct(type_id: String, struct_script: Script, validator: Callable = Callable()) -> bool:
-	return _register(type_id, struct_script, validator, STRUCT)
+	return _register(type_id, struct_script, validator, STRUCT, "")
 
 
-func _register(type_id: String, script: Script, validator: Callable, kind: String) -> bool:
+func _register(type_id: String, script: Script, validator: Callable, kind: String, parent_type_id: String) -> bool:
 	if not _is_valid_type_id(type_id):
 		errors.append("Invalid content type ID '%s'." % type_id)
 		return false
@@ -31,22 +31,17 @@ func _register(type_id: String, script: Script, validator: Callable, kind: Strin
 	if not validator.is_null() and not validator.is_valid():
 		errors.append("Invalid validator for content type '%s'." % type_id)
 		return false
-	
-	var properties: Dictionary = {}
-	for property in script.get_script_property_list():
-		var usage: int = property.get("usage", 0)
-		
-		if (usage & PROPERTY_USAGE_SCRIPT_VARIABLE) == 0:
-			continue
-		
-		if (usage & PROPERTY_USAGE_STORAGE) == 0:
-			continue
-		
-		var property_name: String = property.get("name", "")
-		properties[property_name] = property.duplicate(true)
-	
+
+	if not parent_type_id.is_empty():
+		if kind != TEMPLATE or not _is_valid_type_id(parent_type_id):
+			errors.append("Invalid parent Template '%s' for '%s'." % [parent_type_id, type_id])
+			return false
+
+	var properties := _get_script_properties(script)
+
 	_registered[type_id] = {
 		"kind": kind,
+		"parent_type_id": parent_type_id,
 		"script": script,
 		"validator": validator,
 		"properties": properties,
@@ -54,6 +49,125 @@ func _register(type_id: String, script: Script, validator: Callable, kind: Strin
 		"references": {},
 	}
 	return true
+
+
+# Examina toda a cadeia GDScript: classes intermediarias nao precisam estar registradas.
+func _get_script_properties(script: Script) -> Dictionary:
+	var hierarchy: Array[Script] = []
+	var current: Script = script
+
+	while current != null:
+		hierarchy.push_front(current)
+		current = current.get_base_script()
+
+	var properties: Dictionary = {}
+	for ancestor in hierarchy:
+		for property in ancestor.get_script_property_list():
+			var usage: int = property.get("usage", 0)
+			if (usage & PROPERTY_USAGE_SCRIPT_VARIABLE) == 0:
+				continue
+			if (usage & PROPERTY_USAGE_STORAGE) == 0:
+				continue
+			var property_name: String = property.get("name", "")
+			properties[property_name] = property.duplicate(true)
+
+	return properties
+
+
+# Identifica o ancestral GDScript registrado mais proximo, sem depender de class_name.
+func _get_inferred_parent_candidates(type_id: String) -> Array[String]:
+	var candidates: Array[String] = []
+	if not has_type(type_id):
+		return candidates
+
+	var script: Script = _registered[type_id]["script"]
+	var ancestor := script.get_base_script()
+
+	while ancestor != null:
+		for candidate_id in get_registered_types():
+			if candidate_id != type_id and _registered[candidate_id]["script"] == ancestor:
+				candidates.append(candidate_id)
+		if not candidates.is_empty():
+			return candidates
+		ancestor = ancestor.get_base_script()
+
+	return candidates
+
+
+func get_parent_type(type_id: String) -> String:
+	if not has_type(type_id):
+		return ""
+
+	var declared_parent: String = _registered[type_id]["parent_type_id"]
+	if not declared_parent.is_empty():
+		return declared_parent
+
+	var candidates := _get_inferred_parent_candidates(type_id)
+	return candidates[0] if candidates.size() == 1 else ""
+
+
+# Retorna a cadeia na ordem base -> especializacao, incluindo o proprio tipo.
+func get_type_lineage(type_id: String) -> Array[String]:
+	var lineage: Array[String] = []
+	if not has_type(type_id):
+		return lineage
+
+	var visited: Dictionary = {}
+	var current := type_id
+	while not current.is_empty():
+		if visited.has(current) or not has_type(current):
+			return []
+		visited[current] = true
+		lineage.push_front(current)
+		current = get_parent_type(current)
+
+	return lineage
+
+
+func is_subtype(type_id: String, parent_type: String) -> bool:
+	if not has_type(parent_type):
+		return false
+	return get_type_lineage(type_id).has(parent_type)
+
+
+func get_derived_types(parent_type: String) -> Array[String]:
+	var result: Array[String] = []
+	if not has_type(parent_type):
+		return result
+
+	for candidate_id in get_registered_types():
+		if is_subtype(candidate_id, parent_type):
+			result.append(candidate_id)
+
+	return result
+
+
+func get_root_type(type_id: String) -> String:
+	var lineage := get_type_lineage(type_id)
+	return lineage[0] if not lineage.is_empty() else ""
+
+
+func validate_inheritance() -> bool:
+	var valid := true
+
+	for type_id in get_registered_types():
+		var declared_parent: String = _registered[type_id]["parent_type_id"]
+		if declared_parent.is_empty() and _get_inferred_parent_candidates(type_id).size() > 1:
+			errors.append("Template '%s' has ambiguous GDScript parents; declare its parent explicitly." % type_id)
+			valid = false
+			continue
+
+		var parent_type := get_parent_type(type_id)
+		if not parent_type.is_empty() and not has_type(parent_type):
+			errors.append("Template '%s' has unknown parent Template '%s'." % [type_id, parent_type])
+			valid = false
+			continue
+
+		if get_type_lineage(type_id).is_empty():
+			errors.append("Template inheritance cycle detected for '%s'." % type_id)
+			valid = false
+
+	return valid
 
 
 func validate_references() -> bool:
@@ -82,7 +196,7 @@ func register_reference(owner_type: String, property_name: String, target_type: 
 		errors.append("Invalid reference target '%s'." % target_type)
 		return false
 	
-	var properties: Dictionary = _get_registered_properties(owner_type)
+	var properties := get_properties(owner_type)
 	if not properties.has(property_name):
 		errors.append("Property '%s' does not exist in content type '%s'." % [
 			property_name, owner_type
@@ -117,7 +231,7 @@ func register_struct_binding(owner_type: String, property_name: String, struct_t
 		errors.append("Invalid Struct type ID '%s'." % struct_type)
 		return false
 
-	var properties: Dictionary = _registered[owner_type]["properties"]
+	var properties := get_properties(owner_type)
 
 	if not properties.has(property_name):
 		errors.append("Property '%s' does not exist in content type '%s'." % [property_name, owner_type])
@@ -187,19 +301,27 @@ func get_registered_script(type_id: String) -> Script:
 
 
 func get_properties(type_id: String) -> Dictionary:
-	if not _registered.has(type_id):
-		return {}
-	
-	var properties: Dictionary = _get_registered_properties(type_id)
-	return properties.duplicate(true)
+	if has_struct(type_id):
+		return _get_registered_properties(type_id).duplicate(true)
+
+	var properties: Dictionary = {}
+	for ancestor in get_type_lineage(type_id):
+		var own_properties: Dictionary = _get_registered_properties(ancestor)
+		for property_name in own_properties:
+			properties[property_name] = own_properties[property_name].duplicate(true)
+	return properties
 
 
 func get_reference_target(owner_type: String, property_name: String) -> String:
-	if not _registered.has(owner_type):
-		return ""
-	
-	var references: Dictionary = _get_registered_references(owner_type)
-	return references.get(property_name, "")
+	var lineage := get_type_lineage(owner_type)
+	if has_struct(owner_type):
+		lineage.append(owner_type)
+	lineage.reverse()
+	for ancestor in lineage:
+		var references: Dictionary = _get_registered_references(ancestor)
+		if references.has(property_name):
+			return references[property_name]
+	return ""
 
 
 func get_registered_types() -> Array[String]:
@@ -224,13 +346,18 @@ func _get_registered_ids(kind: String) -> Array[String]:
 func get_struct_binding(owner_type: String, property_name: String) -> Dictionary:
 	if not _registered.has(owner_type):
 		return {}
-	
-	var bindings: Dictionary = _get_registered_struct_bindings(owner_type)
-	if bindings.has(property_name):
-		var binding: Dictionary = bindings[property_name]
-		return binding.duplicate(true)
-	
-	var properties: Dictionary = _get_registered_properties(owner_type)
+
+	var lineage := get_type_lineage(owner_type)
+	if has_struct(owner_type):
+		lineage.append(owner_type)
+	lineage.reverse()
+	for ancestor in lineage:
+		var bindings: Dictionary = _get_registered_struct_bindings(ancestor)
+		if bindings.has(property_name):
+			var binding: Dictionary = bindings[property_name]
+			return binding.duplicate(true)
+
+	var properties := get_properties(owner_type)
 	if not properties.has(property_name):
 		return {}
 	
@@ -312,19 +439,25 @@ func _get_registered_validator(type_id: String) -> Callable:
 func validate_custom(type_id: String, data: Dictionary) -> String:
 	if not _registered.has(type_id):
 		return "Unknown content type '%s'." % type_id
-	
-	var validator: Callable = _get_registered_validator(type_id)
-	if validator.is_null():
-		return ""
-	
-	if not validator.is_valid():
-		return "Validator for '%s' is no longer valid." % type_id
-	
-	var result: Variant = validator.call(data.duplicate(true))
-	if typeof(result) != TYPE_STRING:
-		return "Validator for '%s' must return a String." % type_id
-	
-	return result
+
+	# Primeiro os validadores dos ancestrais, depois os da especializacao.
+	var lineage: Array[String] = get_type_lineage(type_id)
+	if not has_type(type_id):
+		lineage.append(type_id)
+	for ancestor in lineage:
+		var validator: Callable = _get_registered_validator(ancestor)
+		if validator.is_null():
+			continue
+		if not validator.is_valid():
+			return "Validator for '%s' is no longer valid." % ancestor
+
+		var result: Variant = validator.call(data.duplicate(true))
+		if typeof(result) != TYPE_STRING:
+			return "Validator for '%s' must return a String." % ancestor
+		if not result.is_empty():
+			return "[%s] %s" % [ancestor, result]
+
+	return ""
 
 
 func _is_valid_type_id(type_id: String) -> bool:
