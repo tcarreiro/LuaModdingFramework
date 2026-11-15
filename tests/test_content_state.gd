@@ -348,3 +348,98 @@ func test_cannot_execute_after_finish() -> void:
 			{type = "loot", id = "sword"}
 		})
 	""", "core"))
+
+
+func test_content_global_replacement_is_rejected() -> void:
+	assert_false(state.execute("""
+		Content = {}
+	""", "demo_a"))
+
+	assert_true(state.get_errors()[0].contains("Content API"))
+
+
+func test_content_raw_replacement_is_rejected() -> void:
+	assert_true(state.execute("""
+		Content.extend({
+			{type = "loot", id = "sword", max_stack = 1}
+		})
+	""", "core"))
+
+	assert_false(state.execute("""
+		Content.raw = {}
+	""", "demo_a"))
+
+	assert_eq(state.get_registry().get_template("loot", "sword")["max_stack"], 1)
+	assert_true(state.get_errors()[0].contains("Content.raw"))
+
+
+func test_content_extend_replacement_is_rejected() -> void:
+	assert_false(state.execute("""
+		Content.extend = function() end
+	""", "demo_a"))
+
+	assert_true(state.get_errors()[0].contains("Content.extend"))
+
+
+func test_cannot_continue_after_content_error() -> void:
+	assert_false(state.execute("""
+		Content.raw = {}
+	""", "demo_a"))
+
+	assert_false(state.execute("""
+		Content.extend({
+			{type = "loot", id = "sword", max_stack = 1}
+		})
+	""", "demo_b"))
+
+	assert_false(state.get_registry().has_template("loot", "sword"))
+	assert_null(state.finish())
+
+
+func test_lua_error_after_registration_prevents_finalization() -> void:
+	assert_false(state.execute("""
+		Content.extend({
+			{type = "loot", id = "sword", max_stack = 1}
+		})
+
+		error("Intentional error after registration")
+	""", "core"))
+
+	assert_null(state.finish())
+
+
+func test_nested_lua_references_survive_between_scripts() -> void:
+	assert_true(state.execute("""
+		Content.extend({
+			{
+				type = "item-container",
+				id = "chest",
+				initial_items = {
+					{item_id = "sword", amount = 1}
+				}
+			}
+		})
+
+		cached_items = Content.raw["item-container"].chest.initial_items
+		cached_stack = cached_items[1]
+	""", "core"))
+
+	assert_true(state.execute("""
+		cached_stack.amount = 8
+	""", "demo_a"))
+
+	var data := state.get_registry().get_template("item-container", "chest")
+	assert_eq(data["initial_items"][0]["amount"], 8)
+	assert_eq(state.get_registry().get_metadata("item-container", "chest")["last_modified_by"], "demo_a")
+
+
+func test_content_api_integrity_ignores_overridden_rawequal() -> void:
+	assert_false(state.execute("""
+		rawequal = function()
+			return true
+		end
+
+		Content.raw = {}
+	""", "demo_a"))
+
+	assert_true(state.get_errors()[0].contains("Content.raw"))

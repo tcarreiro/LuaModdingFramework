@@ -8,7 +8,9 @@ var _registry: ContentRegistry
 var _lua_state: LuaState
 var _raw: LuaTable
 var _current_mod_id: String = ""
-
+var _content_api: LuaTable
+var _extend_function: LuaFunction
+var _lua_rawequal: LuaFunction
 
 func _init(content_types: ContentTypeRegistry) -> void:
 	_types = content_types
@@ -25,13 +27,15 @@ func start(startup_settings: Dictionary = {}, mod_versions: Dictionary = {}) -> 
 			LuaState.LUA_TABLE | LuaState.LUA_MATH
 	_lua_state.open_libraries(libraries)
 
-	var content_api := _lua_state.create_table()
+	_content_api = _lua_state.create_table()
 	_raw = _lua_state.create_table()
-	content_api["raw"] = _raw
-	content_api["extend"] = _lua_state.create_function(_lua_extend)
+	_extend_function = _lua_state.create_function(_lua_extend)
+	_lua_rawequal = _lua_state.globals["rawequal"]
 
-	_lua_state.globals["Content"] = content_api
-	
+	_content_api["raw"] = _raw
+	_content_api["extend"] = _extend_function
+
+	_lua_state.globals["Content"] = _content_api
 	
 	var startup: Dictionary = {}
 
@@ -65,10 +69,12 @@ func get_errors() -> Array[String]:
 	return result
 
 
-
 func execute(source: String, mod_id: String, chunk_name: String = "") -> bool:
 	if not is_active():
 		errors.append("ContentState is not active.")
+		return false
+
+	if not errors.is_empty() or not _registry.errors.is_empty():
 		return false
 
 	if mod_id.strip_edges().is_empty():
@@ -91,6 +97,9 @@ func execute(source: String, mod_id: String, chunk_name: String = "") -> bool:
 	if errors.size() != error_count or _registry.errors.size() != registry_error_count:
 		return false
 
+	if not _validate_content_api(mod_id):
+		return false
+
 	return _synchronize_raw(mod_id)
 
 
@@ -107,6 +116,33 @@ func finish() -> ContentRegistry:
 
 	close()
 	return result
+
+
+
+func _validate_content_api(mod_id: String) -> bool:
+	var current_content: Variant = _lua_state.globals.rawget("Content")
+
+	if not current_content is LuaTable:
+		errors.append("Mod '%s' removed or replaced the Content API." % mod_id)
+		return false
+
+	if _lua_rawequal.invoke(current_content, _content_api) != true:
+		errors.append("Mod '%s' replaced the Content API table." % mod_id)
+		return false
+
+	var current_raw: Variant = current_content.rawget("raw")
+
+	if _lua_rawequal.invoke(current_raw, _raw) != true:
+		errors.append("Mod '%s' replaced Content.raw." % mod_id)
+		return false
+
+	var current_extend: Variant = current_content.rawget("extend")
+
+	if _lua_rawequal.invoke(current_extend, _extend_function) != true:
+		errors.append("Mod '%s' replaced Content.extend." % mod_id)
+		return false
+
+	return true
 
 
 func _synchronize_raw(mod_id: String) -> bool:
@@ -207,7 +243,10 @@ func define_from_json(data: Dictionary, mod_id: String) -> bool:
 	if not is_active():
 		errors.append("ContentState is not active.")
 		return false
-
+	
+	if not errors.is_empty() or not _registry.errors.is_empty():
+		return false
+	
 	if mod_id.strip_edges().is_empty():
 		errors.append("Cannot register content without a mod ID.")
 		return false
@@ -227,6 +266,9 @@ func define_from_json(data: Dictionary, mod_id: String) -> bool:
 
 
 func _lua_extend(templates: Variant) -> bool:
+	if not errors.is_empty() or not _registry.errors.is_empty():
+		return false
+	
 	if not templates is LuaTable:
 		errors.append("Content.extend expects a Lua table.")
 		return false
@@ -386,6 +428,9 @@ func close() -> void:
 	if is_active():
 		_lua_state.globals.rawset("Content", null)
 
+	_content_api = null
+	_extend_function = null
+	_lua_rawequal = null
 	_raw = null
 	_lua_state = null
 	_current_mod_id = ""
