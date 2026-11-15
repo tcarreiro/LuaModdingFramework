@@ -1,4 +1,3 @@
-
 extends GutTest
 
 const LOOT_SCRIPT = preload("res://example/content/content_loot.gd")

@@ -1,0 +1,13 @@
+[
+  {
+	"type": "item-container",
+	"id": "starter_chest",
+	"capacity": 12,
+	"initial_items": [
+	  {
+		"item_id": "bronze_gauntlet",
+		"amount": 1
+	  }
+	]
+  }
+]

@@ -1,4 +1,3 @@
-
 @tool
 class_name LuaUtils extends RefCounted
 
@@ -6,9 +5,7 @@ class_name LuaUtils extends RefCounted
 static func read_table(value: Variant) -> Variant:
 	if not value is LuaTable:
 		return null
-
 	return value.to_dictionary()
-
 
 
 static func normalize_fields(data: Dictionary, array_fields: Array, color_fields: Array = [], integer_fields: Array = []) -> void:
