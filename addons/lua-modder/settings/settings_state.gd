@@ -36,7 +36,10 @@ var errors: Array[String] = []
 var _lua_state: LuaState
 var _registry: ModSettingsRegistry
 var _current_mod_id: String = ""
-
+var _settings_api: LuaTable
+var _settings_functions: Dictionary = {}
+var _lua_rawequal: LuaFunction
+var _execution_guard := LuaExecutionGuard.new()
 
 func start() -> void:
 	close()
@@ -48,19 +51,25 @@ func start() -> void:
 	var libraries := LuaState.LUA_BASE | LuaState.LUA_STRING | \
 			LuaState.LUA_TABLE | LuaState.LUA_MATH
 	_lua_state.open_libraries(libraries)
+	LuaExecutionGuard.restrict_base_functions(_lua_state)
 	
-	var settings_api := _lua_state.create_table()
-	settings_api["define"] = _lua_state.create_function(_lua_define)
-	settings_api["get"] = _lua_state.create_function(_lua_get)
-	settings_api["update"] = _lua_state.create_function(_lua_update)
-	settings_api["force"] = _lua_state.create_function(_lua_force)
-	
-	_lua_state.globals["Settings"] = settings_api
+	_settings_api = _lua_state.create_table()
+	_settings_functions = {
+		"define": _lua_state.create_function(_lua_define),
+		"get": _lua_state.create_function(_lua_get),
+		"update": _lua_state.create_function(_lua_update),
+		"force": _lua_state.create_function(_lua_force)
+	}
+
+	for method_name in _settings_functions:
+		_settings_api[method_name] = _settings_functions[method_name]
+
+	_lua_rawequal = _lua_state.globals["rawequal"]
+	_lua_state.globals["Settings"] = _settings_api
 
 
 func is_active() -> bool:
 	return _lua_state != null
-
 
 
 func get_errors() -> Array[String]:
@@ -82,29 +91,32 @@ func get_warnings() -> Array[String]:
 	return result
 
 
-
 func execute(source: String, mod_id: String, chunk_name: String = "") -> bool:
 	if not is_active():
-		errors.append("SettingsState is not active")
+		errors.append("SettingsState is not active.")
 		return false
-	
+
+	if not errors.is_empty() or not _registry.errors.is_empty():
+		return false
+
 	if mod_id.strip_edges().is_empty():
 		errors.append("Cannot execute settings without a mod ID.")
 		return false
-	
-	var error_count := errors.size()
-	var registry_error_count := _registry.errors.size()
-	
+
 	_current_mod_id = mod_id
-	var result: Variant = _lua_state.do_string(source, chunk_name)
+	var success := _execution_guard.execute(_lua_state, source, chunk_name)
 	_current_mod_id = ""
-	
-	if result is LuaError:
+
+	if not success:
 		errors.append("Lua error in mod '%s' (%s): %s" % [
-			mod_id, chunk_name, str(result)
+			mod_id, chunk_name, _execution_guard.last_error
 		])
-	
-	return errors.size() == error_count and _registry.errors.size() == registry_error_count
+		return false
+
+	if not errors.is_empty() or not _registry.errors.is_empty():
+		return false
+
+	return _validate_settings_api(mod_id)
 
 
 func finish() -> ModSettingsRegistry:
@@ -121,8 +133,11 @@ func finish() -> ModSettingsRegistry:
 func close() -> void:
 	if is_active():
 		_lua_state.globals["Settings"] = null
-		_lua_state = null
-	
+
+	_settings_api = null
+	_settings_functions.clear()
+	_lua_rawequal = null
+	_lua_state = null
 	_current_mod_id = ""
 
 
@@ -130,7 +145,10 @@ func define_from_json(definition: Dictionary, mod_id: String) -> bool:
 	if not is_active():
 		errors.append("SettingsState is not active.")
 		return false
-
+	
+	if not errors.is_empty() or not _registry.errors.is_empty():
+		return false
+	
 	if mod_id.strip_edges().is_empty():
 		errors.append("Cannot define settings without a mod ID.")
 		return false
@@ -145,6 +163,9 @@ func define_from_json(definition: Dictionary, mod_id: String) -> bool:
 
 
 func _lua_define(definition: Variant) -> bool:
+	if not errors.is_empty() or not _registry.errors.is_empty():
+		return false
+	
 	var data: Variant = LuaUtils.read_table(definition)
 	if data == null:
 		errors.append("Expected a Lua table.")
@@ -189,7 +210,6 @@ func _define_setting(data: Dictionary) -> bool:
 	return _registry.register(setting, _current_mod_id)
 
 
-
 func _lua_get(id: Variant) -> Variant:
 	if typeof(id) != TYPE_STRING:
 		errors.append("Setting ID must be a string.")
@@ -212,6 +232,9 @@ func _lua_get(id: Variant) -> Variant:
 
 
 func _lua_update(id: Variant, changes: Variant) -> bool:
+	if not errors.is_empty() or not _registry.errors.is_empty():
+		return false
+	
 	if typeof(id) != TYPE_STRING:
 		errors.append("Setting ID must be a string.")
 		return false
@@ -239,6 +262,9 @@ func _lua_update(id: Variant, changes: Variant) -> bool:
 
 
 func _lua_force(id: Variant, value: Variant) -> bool:
+	if not errors.is_empty() or not _registry.errors.is_empty():
+		return false
+	
 	if typeof(id) != TYPE_STRING:
 		errors.append("Setting ID must be a string.")
 		return false
@@ -254,4 +280,25 @@ func _lua_force(id: Variant, value: Variant) -> bool:
 		value = LuaUtils.normalize_integer(value)
 	
 	return _registry.force(id, value, _current_mod_id)
-	
+
+
+func _validate_settings_api(mod_id: String) -> bool:
+	var current_api: Variant = _lua_state.globals.rawget("Settings")
+
+	if not current_api is LuaTable:
+		errors.append("Mod '%s' removed or replaced the Settings API." % mod_id)
+		return false
+
+	if _lua_rawequal.invoke(current_api, _settings_api) != true:
+		errors.append("Mod '%s' replaced the Settings API table." % mod_id)
+		return false
+
+	for method_name in _settings_functions:
+		var current_function: Variant = _settings_api.rawget(method_name)
+		var expected_function: Variant = _settings_functions[method_name]
+
+		if _lua_rawequal.invoke(current_function, expected_function) != true:
+			errors.append("Mod '%s' replaced Settings.%s." % [mod_id, method_name])
+			return false
+
+	return true

@@ -11,6 +11,7 @@ var _current_mod_id: String = ""
 var _content_api: LuaTable
 var _extend_function: LuaFunction
 var _lua_rawequal: LuaFunction
+var _execution_guard := LuaExecutionGuard.new()
 
 func _init(content_types: ContentTypeRegistry) -> void:
 	_types = content_types
@@ -26,6 +27,7 @@ func start(startup_settings: Dictionary = {}, mod_versions: Dictionary = {}) -> 
 	var libraries := LuaState.LUA_BASE | LuaState.LUA_STRING | \
 			LuaState.LUA_TABLE | LuaState.LUA_MATH
 	_lua_state.open_libraries(libraries)
+	LuaExecutionGuard.restrict_base_functions(_lua_state)
 
 	_content_api = _lua_state.create_table()
 	_raw = _lua_state.create_table()
@@ -85,12 +87,12 @@ func execute(source: String, mod_id: String, chunk_name: String = "") -> bool:
 	var registry_error_count := _registry.errors.size()
 
 	_current_mod_id = mod_id
-	var result: Variant = _lua_state.do_string(source, chunk_name)
+	var success := _execution_guard.execute(_lua_state, source, chunk_name)
 	_current_mod_id = ""
 
-	if result is LuaError:
+	if not success:
 		errors.append("Lua error in mod '%s' (%s): %s" % [
-			mod_id, chunk_name, str(result)
+			mod_id, chunk_name, _execution_guard.last_error
 		])
 		return false
 

@@ -50,3 +50,7 @@ text = "Ok"
 unique_name_in_owner = true
 layout_mode = 2
 autowrap_mode = 2
+
+[node name="ActiveMods" type="Label" parent="Feedback" unique_id=15406242]
+unique_name_in_owner = true
+layout_mode = 0

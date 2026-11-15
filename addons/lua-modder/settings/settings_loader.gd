@@ -67,6 +67,10 @@ func _load_json(settings_state: SettingsState, manifest: ModManifest, path: Stri
 	if file == null:
 		errors.append("Cannot open settings JSON: '%s'." % path)
 		return false
+	
+	if file.get_length() > 4 * 1024 * 1024:
+		errors.append("JSON file exceeds maximum allowed size: '%s'." % path)
+		return false
 
 	var json := JSON.new()
 	var error := json.parse(file.get_as_text())
@@ -99,6 +103,10 @@ func _execute_lua(settings_state: SettingsState, manifest: ModManifest, path: St
 	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:
 		errors.append("Cannot open settings Lua script: '%s'." % path)
+		return false
+	
+	if file.get_length() > 1 * 1024 * 1024:
+		errors.append("LUA file exceeds maximum allowed size: '%s'." % path)
 		return false
 
 	var source := file.get_as_text()

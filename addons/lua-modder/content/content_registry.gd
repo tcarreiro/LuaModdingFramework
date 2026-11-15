@@ -174,6 +174,32 @@ func get_catalog() -> Dictionary:
 	return _catalog.duplicate(true)
 
 
+# Visao polimorfica: inclui o tipo informado e todos os seus subtipos.
+# A consulta nao altera os buckets reais do catalogo (Content.raw).
+func get_templates_in_family(type_id: String) -> Dictionary:
+	var result: Dictionary = {}
+	for derived_type in _types.get_derived_types(type_id):
+		var bucket: Dictionary = _catalog.get(derived_type, {})
+		for template_id in bucket:
+			if result.has(template_id):
+				return {} # IDs ambiguos; finalize() rejeita essa situacao.
+			result[template_id] = bucket[template_id].duplicate(true)
+	return result
+
+
+func get_template_in_family(type_id: String, template_id: String) -> Dictionary:
+	var result: Dictionary = {}
+	var found := false
+	for derived_type in _types.get_derived_types(type_id):
+		if not has_template(derived_type, template_id):
+			continue
+		if found:
+			return {} # Identidade ambigua antes da finalizacao.
+		result = get_template(derived_type, template_id)
+		found = true
+	return result
+
+
 func get_metadata(type_id: String, template_id: String) -> Dictionary:
 	if not _metadata.has(type_id):
 		return {}
@@ -221,6 +247,10 @@ func finalize() -> bool:
 
 		normalized_catalog[type_id] = normalized_bucket
 
+	if not errors.is_empty():
+		return false
+
+	_validate_family_id_uniqueness(normalized_catalog)
 	if not errors.is_empty():
 		return false
 
@@ -332,10 +362,11 @@ func _validate_type_registry() -> bool:
 
 	var previous_error_count := _types.errors.size()
 
+	var inheritance_valid := _types.validate_inheritance()
 	var bindings_valid := _types.validate_struct_bindings()
 	var references_valid := _types.validate_references()
 
-	if bindings_valid and references_valid:
+	if inheritance_valid and bindings_valid and references_valid:
 		return true
 
 	for index in range(previous_error_count, _types.errors.size()):
@@ -356,9 +387,7 @@ func _validate_object_references(owner_type: String, data: Dictionary, path: Str
 			var target_id := String(value)
 
 			if not target_id.is_empty():
-				var target_bucket: Dictionary = catalog.get(target_type, {})
-
-				if not target_bucket.has(target_id):
+				if not _catalog_has_template_in_family(catalog, target_type, target_id):
 					errors.append("%s: unknown Reference '%s.%s'." % [property_path, target_type, target_id])
 
 		var binding := _types.get_struct_binding(owner_type, property_name)
@@ -377,3 +406,32 @@ func _validate_object_references(owner_type: String, data: Dictionary, path: Str
 					_validate_object_references(struct_id, value[index], "%s[%d]" % [property_path, index], catalog)
 		elif typeof(value) == TYPE_DICTIONARY:
 			_validate_object_references(struct_id, value, property_path, catalog)
+
+
+# Nomes de Templates sao unicos dentro de cada familia de heranca.
+# Familias independentes podem reutilizar o mesmo ID.
+func _validate_family_id_uniqueness(catalog: Dictionary) -> void:
+	var seen: Dictionary = {}
+	for type_id in catalog:
+		var root_type := _types.get_root_type(type_id)
+		if root_type.is_empty():
+			continue
+		if not seen.has(root_type):
+			seen[root_type] = {}
+		var used_ids: Dictionary = seen[root_type]
+		var bucket: Dictionary = catalog[type_id]
+		for template_id in bucket:
+			if used_ids.has(template_id):
+				errors.append("Duplicate Template ID '%s' in family '%s' (%s and %s)." % [
+					template_id, root_type, used_ids[template_id], type_id
+				])
+			else:
+				used_ids[template_id] = type_id
+
+
+func _catalog_has_template_in_family(catalog: Dictionary, type_id: String, template_id: String) -> bool:
+	for descendant_type in _types.get_derived_types(type_id):
+		var bucket: Dictionary = catalog.get(descendant_type, {})
+		if bucket.has(template_id):
+			return true
+	return false

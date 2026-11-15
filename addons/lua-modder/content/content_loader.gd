@@ -104,11 +104,15 @@ func _collect_json_files(path: String, result: Array[String]) -> bool:
 
 func _load_json(content_state: ContentState, manifest: ModManifest, path: String) -> bool:
 	var file := FileAccess.open(path, FileAccess.READ)
-
+	
 	if file == null:
 		errors.append("Cannot open content JSON: '%s'." % path)
 		return false
-
+	
+	if file.get_length() > 4 * 1024 * 1024:
+		errors.append("JSON file exceeds maximum allowed size: '%s'." % path)
+		return false
+	
 	var json := JSON.new()
 	var error := json.parse(file.get_as_text())
 
@@ -150,7 +154,11 @@ func _execute_lua(content_state: ContentState, manifest: ModManifest, path: Stri
 	if file == null:
 		errors.append("Cannot open content Lua script: '%s'." % path)
 		return false
-
+	
+	if file.get_length() > 1 * 1024 * 1024:
+		errors.append("LUA file exceeds maximum allowed size: '%s'." % path)
+		return false
+	
 	var source := file.get_as_text()
 
 	if not content_state.execute(source, manifest.id, path):
