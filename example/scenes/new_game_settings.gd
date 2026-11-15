@@ -215,12 +215,6 @@ func _on_confirm_pressed() -> void:
 		selected_values[setting.id] = value
 
 	GameMods.selected_settings = selected_values
-	#feedback.text = "Configurações validadas e confirmadas!"
-#
-	#print("\n[NewGameSettings] Player settings confirmed:")
-#
-	#for id in GameMods.selected_settings:
-	#	print(" - %s = %s" % [id, str(GameMods.selected_settings[id])])
 	
 	if not GameMods.run_content_stage():
 		feedback.text = "Erro ao carregar o Content Stage. Consulte o Output."
@@ -255,3 +249,19 @@ func _on_confirm_pressed() -> void:
 				metadata["owner_mod_id"],
 				metadata["last_modified_by"]
 			])
+	
+	print("\n[ContentStage] Loot family:")
+
+	var content_registry = GameMods.content_registry
+	
+	var loot_family = content_registry.get_templates_in_family("loot")
+
+	for template_id in loot_family:
+		var template: Dictionary = loot_family[template_id]
+		print("  - %s [%s]" % [template_id, template["type"]])
+
+	print("\n[ContentStage] Exact loot bucket:")
+	print(content_registry.get_templates("loot").keys())
+
+	print("\n[ContentStage] Polymorphic lookup:")
+	print(content_registry.get_template_in_family("loot", "training_gauntlet"))

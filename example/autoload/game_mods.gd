@@ -6,6 +6,10 @@ const LOOT_SCRIPT = preload("res://example/content/content_loot.gd")
 const STACK_SCRIPT = preload("res://example/content/content_item_stack.gd")
 const CONTAINER_SCRIPT = preload("res://example/content/content_container.gd")
 
+const EQUIPMENT_SCRIPT = preload("res://example/content/content_equipment.gd")
+const GAUNTLET_SCRIPT = preload("res://example/content/content_gauntlet.gd")
+const CARD_SCRIPT = preload("res://example/content/content_card.gd")
+
 var mod_manager: ModManager
 var selected_mods: Array[ModManifest] = []
 var selected_mod_ids: Array[String] = []
@@ -78,10 +82,20 @@ func run_content_stage() -> bool:
 
 	var content_types := ContentTypeRegistry.new()
 
+	# Templates
 	content_types.register_type("loot", LOOT_SCRIPT, _validate_loot)
+	content_types.register_type("equipment", EQUIPMENT_SCRIPT)
+	content_types.register_type("gauntlet", GAUNTLET_SCRIPT, _validate_gauntlet)
+	content_types.register_type("card", CARD_SCRIPT)
 	content_types.register_type("item-container", CONTAINER_SCRIPT)
+
+	# Structs
 	content_types.register_struct("item-stack", STACK_SCRIPT)
+	content_types.register_struct_binding("equipment", "attached_items", "item-stack")
+
+	# References
 	content_types.register_reference("item-stack", "item_id", "loot")
+	content_types.register_reference("equipment", "material_id", "loot")
 
 	if not content_types.errors.is_empty():
 		content_errors.append_array(content_types.errors)
@@ -112,5 +126,12 @@ func _validate_loot(data: Dictionary) -> String:
 
 	if data.has("weight") and data["weight"] < 0.0:
 		return "weight cannot be negative."
+
+	return ""
+
+
+func _validate_gauntlet(data: Dictionary) -> String:
+	if data.get("socket_count", 1) < 1:
+		return "socket_count must be greater than zero."
 
 	return ""
