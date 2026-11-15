@@ -215,9 +215,43 @@ func _on_confirm_pressed() -> void:
 		selected_values[setting.id] = value
 
 	GameMods.selected_settings = selected_values
-	feedback.text = "Configurações validadas e confirmadas!"
+	#feedback.text = "Configurações validadas e confirmadas!"
+#
+	#print("\n[NewGameSettings] Player settings confirmed:")
+#
+	#for id in GameMods.selected_settings:
+	#	print(" - %s = %s" % [id, str(GameMods.selected_settings[id])])
+	
+	if not GameMods.run_content_stage():
+		feedback.text = "Erro ao carregar o Content Stage. Consulte o Output."
 
-	print("\n[NewGameSettings] Player settings confirmed:")
+		for error in GameMods.content_errors:
+			push_error("[ContentStage] %s" % error)
 
-	for id in GameMods.selected_settings:
-		print(" - %s = %s" % [id, str(GameMods.selected_settings[id])])
+		return
+
+	var catalog = GameMods.content_registry.get_catalog()
+	var template_count := 0
+
+	for type_id in catalog:
+		var templates: Dictionary = catalog[type_id]
+		template_count += templates.size()
+
+	feedback.text = "Configurações confirmadas! %d Templates carregados." % template_count
+
+	print("\n[ContentStage] Finalized catalog:")
+
+	for type_id in catalog:
+		print("Type: %s" % type_id)
+
+		var templates: Dictionary = catalog[type_id]
+
+		for template_id in templates:
+			var template: Dictionary = templates[template_id]
+			var metadata = GameMods.content_registry.get_metadata(type_id, template_id)
+
+			print("  - %s: %s" % [template_id, str(template)])
+			print("    Owner: %s | Last modified by: %s" % [
+				metadata["owner_mod_id"],
+				metadata["last_modified_by"]
+			])
