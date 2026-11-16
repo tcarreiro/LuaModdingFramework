@@ -111,7 +111,7 @@ func _run_protected(lua_state: LuaState, callback: LuaFunction, arguments: Array
 				last_result = result
 				success = true
 
-	#_active_coroutine = null
+	_active_coroutine = null
 	_active_state = null
 	_running = false
 

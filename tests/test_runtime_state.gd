@@ -156,3 +156,59 @@ func test_close_releases_state() -> void:
 
 	assert_eq(state.get_phase(), RuntimeState.Phase.CLOSED)
 	assert_false(state.finish_setup())
+
+
+func test_registers_remote_interface() -> void:
+	assert_true(state.execute_control("""
+		local name = remote.add_interface("inventory", {
+			get_quantity = function(item_id)
+				return 10
+			end,
+
+			has_item = function(item_id)
+				return true
+			end
+		})
+
+		assert(name == "core:inventory")
+	""", "core/control.lua"))
+
+	assert_eq(state.get_remote_interfaces(), ["core:inventory"])
+	assert_true(state.has_remote_method("core:inventory", "get_quantity"))
+	assert_true(state.has_remote_method("core:inventory", "has_item"))
+	assert_false(state.has_remote_method("core:inventory", "missing"))
+
+
+func test_rejects_invalid_remote_method() -> void:
+	assert_false(state.execute_control("""
+		remote.add_interface("inventory", {
+			get_quantity = 123
+		})
+	""", "core/control.lua"))
+
+	assert_true(state.get_remote_interfaces().is_empty())
+	assert_false(state.get_errors().is_empty())
+
+
+func test_rejects_duplicate_remote_interface() -> void:
+	assert_false(state.execute_control("""
+		remote.add_interface("inventory", {
+			first = function() end
+		})
+
+		remote.add_interface("inventory", {
+			second = function() end
+		})
+	""", "core/control.lua"))
+
+	assert_eq(state.get_remote_interfaces(), ["core:inventory"])
+	assert_false(state.has_remote_method("core:inventory", "second"))
+
+
+func test_cannot_replace_remote_api() -> void:
+	assert_false(state.execute_control("""
+		remote.add_interface = function() end
+	""", "core/control.lua"))
+
+	assert_false(state.get_errors().is_empty())
+	assert_false(state.finish_setup())
