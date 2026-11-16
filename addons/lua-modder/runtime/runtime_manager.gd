@@ -16,9 +16,10 @@ var errors: Array[String] = []
 var _phase: int = Phase.CREATED
 var _states: Dictionary[String, RuntimeState] = {}
 var _ordered_ids: Array[String] = []
-var _custom_event_owners: Dictionary = {}
-var _event_queue: Array[Dictionary] = []
 var _draining_events := false
+var _event_queue: Array[Dictionary] = []
+var _custom_event_owners: Dictionary = {}
+var _remote_interface_owners: Dictionary[String, String] = {}
 
 func prepare(mods: Array[ModManifest]) -> bool:
 	if _phase != Phase.CREATED:
@@ -89,6 +90,19 @@ func prepare(mods: Array[ModManifest]) -> bool:
 				_fail()
 				return false
 			_custom_event_owners[event_name] = mod_id
+	
+	for mod_id in _ordered_ids:
+		var state: RuntimeState = _states[mod_id]
+		for interface_name in state.get_remote_interfaces():
+			if not interface_name.begins_with(mod_id + ":"):
+				errors.append("Mod '%s' registered a remote interface outside its namespace: '%s'." % [mod_id, interface_name])
+				_fail()
+				return false
+			if _remote_interface_owners.has(interface_name):
+				errors.append("Duplicate remote interface '%s'." % interface_name)
+				_fail()
+				return false
+			_remote_interface_owners[interface_name] = mod_id
 	
 	_phase = Phase.PREPARED
 	return true
@@ -200,6 +214,39 @@ func get_state(mod_id: String) -> RuntimeState:
 	return _states.get(mod_id)
 
 
+func get_remote_interfaces() -> Array[String]:
+	var result: Array[String] = []
+
+	if _phase != Phase.PREPARED and _phase != Phase.ACTIVE:
+		return result
+
+	for interface_name in _remote_interface_owners:
+		result.append(interface_name)
+
+	return result
+
+
+func get_remote_interface_owner(interface_name: String) -> String:
+	if _phase != Phase.PREPARED and _phase != Phase.ACTIVE:
+		return ""
+	return _remote_interface_owners.get(interface_name, "")
+
+
+func has_remote_interface(interface_name: String) -> bool:
+	return not get_remote_interface_owner(interface_name).is_empty()
+
+
+func has_remote_method(interface_name: String, method_name: String) -> bool:
+	var owner_id := get_remote_interface_owner(interface_name)
+	if owner_id.is_empty():
+		return false
+	
+	var state: RuntimeState = _states.get(owner_id)
+	if state == null:
+		return false
+	return state.has_remote_method(interface_name, method_name)
+
+
 func get_errors() -> Array[String]:
 	return errors.duplicate()
 
@@ -221,6 +268,7 @@ func _release_states() -> void:
 	_states.clear()
 	_ordered_ids.clear()
 	_custom_event_owners.clear()
+	_remote_interface_owners.clear()
 	_event_queue.clear()
 	_draining_events = false
 

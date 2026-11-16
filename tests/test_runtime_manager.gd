@@ -900,7 +900,110 @@ func test_custom_event_nested_payload() -> void:
 			})
 		end)
 	""")
-	print(_record_lifecycle_call)
 	assert_true(runtime.prepare(_resolve_mods()))
 	assert_true(runtime.activate({"record": _record_lifecycle_call}))
 	assert_eq(lifecycle_calls, ["nested_ok"])
+
+
+func test_remote_interfaces_are_collected_after_setup() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		remote.add_interface("inventory", {
+			get_quantity = function(item_id)
+				return 10
+			end,
+			has_item = function(item_id)
+				return true
+			end
+		})
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		remote.add_interface("inventory", {
+			get_quantity = function(item_id)
+				return 20
+			end
+		})
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.PREPARED)
+
+	var interfaces := runtime.get_remote_interfaces()
+
+	assert_eq(interfaces.size(), 2)
+	assert_true(interfaces.has("core:inventory"))
+	assert_true(interfaces.has("demo_a:inventory"))
+
+	assert_eq(runtime.get_remote_interface_owner("core:inventory"), "core")
+	assert_eq(runtime.get_remote_interface_owner("demo_a:inventory"), "demo_a")
+
+	assert_true(runtime.has_remote_interface("core:inventory"))
+	assert_true(runtime.has_remote_interface("demo_a:inventory"))
+	assert_false(runtime.has_remote_interface("unknown:inventory"))
+
+	assert_true(runtime.has_remote_method("core:inventory", "get_quantity"))
+	assert_true(runtime.has_remote_method("core:inventory", "has_item"))
+	assert_false(runtime.has_remote_method("core:inventory", "missing"))
+
+	assert_true(runtime.has_remote_method("demo_a:inventory", "get_quantity"))
+	assert_false(runtime.has_remote_method("demo_a:inventory", "has_item"))
+
+	assert_true(runtime.activate())
+	assert_true(runtime.has_remote_interface("core:inventory"))
+
+
+func test_remote_catalog_ignores_mods_without_control() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		remote.add_interface("example", {
+			test = function()
+				return true
+			end
+		})
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+
+	assert_eq(runtime.get_remote_interfaces(), ["core:example"])
+	assert_true(runtime.has_remote_interface("core:example"))
+	assert_false(runtime.has_remote_interface("demo_a:example"))
+	assert_eq(runtime.get_remote_interface_owner("demo_a:example"), "")
+
+
+func test_remote_catalog_is_cleared_on_close() -> void:
+	_write_file("core", "control.lua", """
+		remote.add_interface("example", {
+			test = function()
+				return true
+			end
+		})
+	""")
+
+	assert_true(runtime.get_remote_interfaces().is_empty())
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.has_remote_interface("core:example"))
+
+	runtime.close()
+
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.CLOSED)
+	assert_true(runtime.get_remote_interfaces().is_empty())
+	assert_false(runtime.has_remote_interface("core:example"))
+	assert_false(runtime.has_remote_method("core:example", "test"))
+
+
+func test_invalid_remote_registration_aborts_manager_preparation() -> void:
+	_write_file("core", "control.lua", """
+		remote.add_interface("invalid", {
+			test = 123
+		})
+	""")
+
+	assert_false(runtime.prepare(_resolve_mods()))
+
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
+	assert_true(runtime.get_remote_interfaces().is_empty())
+	assert_false(runtime.get_errors().is_empty())
