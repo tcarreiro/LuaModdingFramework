@@ -15,7 +15,6 @@ var _phase: int = Phase.CREATED
 var _lua_state: LuaState
 var _script_api: LuaTable
 var _game_api: LuaTable
-var _lua_rawequal: LuaFunction
 var _script_functions: Dictionary = {}
 var _lifecycle_handlers: Dictionary = {}
 var _execution_guard := LuaExecutionGuard.new()
@@ -54,7 +53,6 @@ func start(mod_versions: Dictionary = {}) -> bool:
 	for function_name in _script_functions:
 		_script_api[function_name] = _script_functions[function_name]
 
-	_lua_rawequal = _lua_state.globals["rawequal"]
 	_lua_state.globals["script"] = _script_api
 	_lua_state.globals["mods"] = LuaUtils.to_lua_value(_lua_state, mod_versions)
 	_lua_state.globals["game"] = null
@@ -81,7 +79,7 @@ func execute_control(source: String, chunk_name: String = "") -> bool:
 
 	if not errors.is_empty():
 		return false
-	
+
 	return _validate_setup_api()
 
 
@@ -119,6 +117,58 @@ func activate(game_functions: Dictionary = {}) -> bool:
 	return true
 
 
+func run_lifecycle(handler_name: String, data: Dictionary = {}) -> bool:
+	if _phase != Phase.ACTIVE or not errors.is_empty():
+		return false
+
+	if handler_name not in ["on_init", "on_load", "on_configuration_changed"]:
+		errors.append("Unknown lifecycle callback '%s' for mod '%s'." % [handler_name, mod_id])
+		return false
+
+	if not _lifecycle_handlers.has(handler_name):
+		return true
+
+	var is_load := handler_name == "on_load"
+
+	if is_load:
+		_lua_state.globals.rawset("game", null)
+
+	var arguments: Array = []
+
+	if handler_name == "on_configuration_changed":
+		arguments.append(LuaUtils.to_lua_value(_lua_state, data))
+
+	var callback: LuaFunction = _lifecycle_handlers[handler_name]
+
+	var success := _execution_guard.invoke(
+		_lua_state,
+		callback,
+		arguments,
+		"%s/%s" % [mod_id, handler_name]
+	)
+
+	if is_load:
+		if _lua_state.globals.rawget("game") != null:
+			errors.append("Mod '%s' defined game during on_load." % mod_id)
+
+		_lua_state.globals.rawset("game", _game_api)
+	else:
+		var current_game: Variant = _lua_state.globals.rawget("game")
+
+		if not _same_lua_object(current_game, _game_api):
+			errors.append("Mod '%s' replaced the game API during %s." % [mod_id, handler_name])
+			_lua_state.globals.rawset("game", _game_api)
+
+	if not success:
+		errors.append("Lua error in mod '%s' (%s): %s" % [
+			mod_id, handler_name, _execution_guard.last_error
+		])
+
+	_validate_script_api()
+	return success and errors.is_empty()
+
+
+
 func get_phase() -> int:
 	return _phase
 
@@ -136,7 +186,6 @@ func close() -> void:
 	_script_functions.clear()
 	_script_api = null
 	_game_api = null
-	_lua_rawequal = null
 	_lua_state = null
 	_phase = Phase.CLOSED
 
@@ -170,14 +219,20 @@ func _register_lifecycle_handler(handler_name: String, handler: Variant) -> bool
 	return true
 
 
-func _validate_setup_api() -> bool:
+func _same_lua_object(left: Variant, right: Variant) -> bool:
+	if not left is LuaObject or not right is LuaObject:
+		return false
+	return left.get_lua_state() == right.get_lua_state() and left.get_pointer_value() == right.get_pointer_value()
+
+
+func _validate_script_api() -> bool:
 	var current_script: Variant = _lua_state.globals.rawget("script")
 
 	if not current_script is LuaTable:
 		errors.append("Mod '%s' removed or replaced the script API." % mod_id)
 		return false
 
-	if current_script.get_lua_state() != _lua_state or current_script.get_pointer_value() != _script_api.get_pointer_value():
+	if not _same_lua_object(current_script, _script_api):
 		errors.append("Mod '%s' replaced the script API." % mod_id)
 		return false
 
@@ -185,13 +240,16 @@ func _validate_setup_api() -> bool:
 		var current_function: Variant = _script_api.rawget(function_name)
 		var expected_function: LuaFunction = _script_functions[function_name]
 
-		if not current_function is LuaFunction:
+		if not current_function is LuaFunction or not _same_lua_object(current_function, expected_function):
 			errors.append("Mod '%s' replaced script.%s." % [mod_id, function_name])
 			return false
 
-		if current_function.get_lua_state() != _lua_state or current_function.get_pointer_value() != expected_function.get_pointer_value():
-			errors.append("Mod '%s' replaced script.%s." % [mod_id, function_name])
-			return false
+	return true
+
+
+func _validate_setup_api() -> bool:
+	if not _validate_script_api():
+		return false
 
 	if _lua_state.globals.rawget("game") != null:
 		errors.append("Mod '%s' attempted to define game during setup." % mod_id)

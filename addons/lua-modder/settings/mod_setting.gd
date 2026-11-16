@@ -57,7 +57,6 @@ var last_modified_by: String = ""
 var forced_by_mod_id: String = ""
 
 func get_effective_value() -> Variant:
-	# TBD: should have 'selected_value' and initializes as = default_value?
 	return forced_value if is_forced() else default_value
 
 

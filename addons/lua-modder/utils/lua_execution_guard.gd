@@ -1,114 +1,141 @@
-@tool
 class_name LuaExecutionGuard extends RefCounted
 
-const DEFAULT_INSTRUCTION_LIMIT := 500_000
-const DEFAULT_TIME_LIMIT_MS := 500
-const DEFAULT_MEMORY_LIMIT_BYTES := 32 * 1024 * 1024
-const DEFAULT_SOURCE_LIMIT_BYTES := 1024 * 1024
+const DEFAULT_MAX_INSTRUCTIONS := 500_000
+const DEFAULT_MAX_DURATION_MS := 500
+const DEFAULT_MAX_MEMORY_BYTES := 32 * 1024 * 1024
+const DEFAULT_MAX_SOURCE_BYTES := 1024 * 1024
 const DEFAULT_HOOK_INTERVAL := 1000
 
-var instruction_limit: int = DEFAULT_INSTRUCTION_LIMIT
-var time_limit_ms: int = DEFAULT_TIME_LIMIT_MS
-var memory_limit_bytes: int = DEFAULT_MEMORY_LIMIT_BYTES
-var source_limit_bytes: int = DEFAULT_SOURCE_LIMIT_BYTES
+var max_instructions: int = DEFAULT_MAX_INSTRUCTIONS
+var max_duration_ms: int = DEFAULT_MAX_DURATION_MS
+var max_memory_bytes: int = DEFAULT_MAX_MEMORY_BYTES
+var max_source_bytes: int = DEFAULT_MAX_SOURCE_BYTES
 var hook_interval: int = DEFAULT_HOOK_INTERVAL
 
 var last_error: String = ""
+var last_result: Variant = null
 
-var _lua_state: LuaState
-var _instruction_count: int = 0
+var _active_state: LuaState
 var _started_at_ms: int = 0
-var _limit_error: String = ""
+var _executed_instructions: int = 0
+var _abort_reason: String = ""
+var _running: bool = false
+
+
+static func restrict_base_functions(lua_state: LuaState) -> void:
+	for function_name in ["dofile", "loadfile", "load", "collectgarbage"]:
+		lua_state.globals.rawset(function_name, null)
 
 
 func execute(lua_state: LuaState, source: String, chunk_name: String = "") -> bool:
 	last_error = ""
-	_limit_error = ""
+	last_result = null
+
+	if _running:
+		return _fail("LuaExecutionGuard is already executing.")
+
+	if lua_state == null:
+		return _fail("LuaState is null.")
 
 	var buffer := source.to_utf8_buffer()
 
-	if buffer.size() > source_limit_bytes:
-		last_error = "Lua source exceeds maximum size of %d bytes." % source_limit_bytes
-		return false
+	if buffer.size() > max_source_bytes:
+		return _fail("Lua source exceeds maximum allowed size.")
 
-	if lua_state.get_memory_used() > memory_limit_bytes:
-		last_error = "Lua memory limit exceeded before execution."
-		return false
-
-	# Accept Lua source only, never compiled bytecode.
-	var loaded: Variant = lua_state.load_buffer(buffer, chunk_name, LuaState.LOAD_MODE_TEXT)
+	var loaded: Variant = lua_state.load_buffer(buffer,
+		chunk_name, LuaState.LOAD_MODE_TEXT)
 
 	if loaded is LuaError:
-		last_error = str(loaded)
-		return false
+		return _fail("Lua compilation error: %s" % str(loaded))
 
 	if not loaded is LuaFunction:
-		last_error = "Failed to compile Lua source."
-		return false
+		return _fail("Lua compilation did not return a function.")
 
-	var coroutine := LuaCoroutine.create(loaded)
+	return _run_protected(lua_state, loaded, [], chunk_name)
+
+
+func invoke(lua_state: LuaState, callback: LuaFunction, arguments: Array = [], callback_name: String = "") -> bool:
+	last_error = ""
+	last_result = null
+
+	if _running:
+		return _fail("LuaExecutionGuard is already executing.")
+
+	if lua_state == null or callback == null:
+		return _fail("Invalid LuaState or callback.")
+
+	if callback.get_lua_state() != lua_state:
+		return _fail("Lua callback belongs to a different LuaState.")
+
+	for argument in arguments:
+		if argument is LuaObject and argument.get_lua_state() != lua_state:
+			return _fail("Lua argument belongs to a different LuaState.")
+
+	return _run_protected(lua_state, callback, arguments, callback_name)
+
+
+func _run_protected(lua_state: LuaState, callback: LuaFunction, arguments: Array, context: String) -> bool:
+	_running = true
+	_active_state = lua_state
+	_started_at_ms = Time.get_ticks_msec()
+	_executed_instructions = 0
+	_abort_reason = ""
+
+	var success := false
+	var coroutine := LuaCoroutine.create(callback)
 
 	if coroutine == null:
 		last_error = "Failed to create Lua coroutine."
-		return false
+	else:
+		if lua_state.get_memory_used() > max_memory_bytes:
+			last_error = "Lua memory limit exceeded."
+		else:
+			coroutine.set_hook(_on_hook, LuaThread.HOOK_MASK_COUNT,
+				maxi(1, hook_interval))
 
-	_lua_state = lua_state
-	_instruction_count = 0
-	_started_at_ms = Time.get_ticks_msec()
+			var result: Variant = coroutine.resumev(arguments)
 
-	coroutine.set_hook(_on_hook, LuaThread.HOOK_MASK_COUNT, hook_interval)
+			coroutine.set_hook(null, 0)
 
-	var result: Variant = coroutine.resume()
-	var status: int = coroutine.status
+			if not _abort_reason.is_empty():
+				last_error = _abort_reason
+			elif result is LuaError:
+				last_error = str(result)
+			elif coroutine.status == LuaThread.STATUS_YIELD:
+				last_error = "Lua coroutine yielded unexpectedly."
+			elif coroutine.status != LuaThread.STATUS_DEAD:
+				last_error = "Lua coroutine terminated with status %d." % coroutine.status
+			else:
+				last_result = result
+				success = true
 
-	coroutine.set_hook(null, 0)
+	_active_state = null
+	_running = false
 
-	_lua_state = null
+	if not success and not context.is_empty():
+		last_error = "%s: %s" % [context, last_error]
 
-	if not _limit_error.is_empty():
-		last_error = _limit_error
-		return false
-
-	if result is LuaError:
-		last_error = str(result)
-		return false
-
-	if status != LuaThread.STATUS_DEAD:
-		last_error = "Lua execution did not complete normally. Status: %d." % status
-		return false
-
-	if lua_state.get_memory_used() > memory_limit_bytes:
-		last_error = "Lua memory limit exceeded after execution."
-		return false
-
-	return true
+	return success
 
 
 func _on_hook(_debug: LuaDebug) -> int:
-	_instruction_count += hook_interval
+	_executed_instructions += maxi(1, hook_interval)
 
-	if _instruction_count >= instruction_limit:
-		_limit_error = "Lua instruction limit exceeded (%d instructions)." % instruction_limit
+	if _executed_instructions >= max_instructions:
+		_abort_reason = "Lua instruction limit exceeded."
 		return LuaThread.HOOK_YIELD
 
-	var elapsed := Time.get_ticks_msec() - _started_at_ms
-
-	if elapsed >= time_limit_ms:
-		_limit_error = "Lua execution time limit exceeded (%d ms)." % time_limit_ms
+	if Time.get_ticks_msec() - _started_at_ms >= max_duration_ms:
+		_abort_reason = "Lua execution time limit exceeded."
 		return LuaThread.HOOK_YIELD
 
-	if _lua_state.get_memory_used() > memory_limit_bytes:
-		_limit_error = "Lua memory limit exceeded (%d bytes)." % memory_limit_bytes
+	if _active_state.get_memory_used() > max_memory_bytes:
+		_abort_reason = "Lua memory limit exceeded."
 		return LuaThread.HOOK_YIELD
 
 	return LuaThread.HOOK_OK
 
 
-static func restrict_base_functions(lua_state: LuaState) -> void:
-	for function_name in [
-		"dofile",
-		"loadfile",
-		"load",
-		"collectgarbage"
-	]:
-		lua_state.globals.rawset(function_name, null)
+func _fail(message: String) -> bool:
+	last_error = message
+	return false
