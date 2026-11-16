@@ -233,8 +233,8 @@ func test_loader_rejects_oversized_control() -> void:
 	assert_true(runtime.get_errors()[0].contains("exceeds"))
 
 
-func _record_lifecycle_call(name: String) -> void:
-	lifecycle_calls.append(name)
+func _record_lifecycle_call(p_name: String) -> void:
+	lifecycle_calls.append(p_name)
 
 
 func test_new_game_runs_on_init_with_game_access() -> void:

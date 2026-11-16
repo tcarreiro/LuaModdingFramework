@@ -1,6 +1,7 @@
 @tool
 class_name LuaUtils extends RefCounted
 
+const MAX_FLOAT := 9007199254740991.0
 
 static func read_table(value: Variant) -> Variant:
 	if not value is LuaTable:
@@ -39,7 +40,7 @@ static func normalize_integer(value: Variant) -> Variant:
 	if not is_finite(number) or number != floorf(number):
 		return value
 
-	if absf(number) > 9007199254740991.0:
+	if absf(number) > MAX_FLOAT:
 		return value
 
 	return int(number)
