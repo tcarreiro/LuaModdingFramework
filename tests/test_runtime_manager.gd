@@ -75,6 +75,11 @@ func _get_test_value() -> int:
 	return 42
 
 
+func _record_lifecycle_call(p_name: String) -> void:
+	lifecycle_calls.append(p_name)
+
+
+
 func test_initial_phase() -> void:
 	assert_eq(runtime.get_phase(), RuntimeManager.Phase.CREATED)
 	assert_null(runtime.get_state("core"))
@@ -231,10 +236,6 @@ func test_loader_rejects_oversized_control() -> void:
 	assert_false(runtime.prepare(_resolve_mods()))
 	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
 	assert_true(runtime.get_errors()[0].contains("exceeds"))
-
-
-func _record_lifecycle_call(p_name: String) -> void:
-	lifecycle_calls.append(p_name)
 
 
 func test_new_game_runs_on_init_with_game_access() -> void:
@@ -730,3 +731,176 @@ func test_event_is_delivered_after_activation() -> void:
 	assert_true(runtime.emit_event("run_started", {"difficulty": 3}))
 
 	assert_eq(lifecycle_calls, ["event:1", "event:2"])
+
+
+func test_custom_event_has_stable_name() -> void:
+	_write_file("core", "control.lua", """
+		local event_id = script.register_event("card_drawn")
+		assert(event_id == "core:card_drawn")
+
+		script.on_event(event_id, function(event)
+			assert(event.name == "core:card_drawn")
+			assert(event.mod_name == "core")
+			assert(event.amount == 2)
+			game.record("received")
+		end)
+
+		script.on_init(function()
+			script.raise_event(event_id, {amount = 2})
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+	assert_eq(lifecycle_calls, ["received"])
+
+
+func test_another_mod_can_subscribe_to_custom_event() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		local event_id = script.register_event("special_action")
+
+		script.on_event(event_id, function(event)
+			game.record("core")
+		end)
+
+		script.on_init(function()
+			script.raise_event(event_id, {})
+		end)
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		script.on_event("core:special_action", function(event)
+			assert(event.mod_name == "core")
+			game.record("demo_a")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+	assert_eq(lifecycle_calls, ["core", "demo_a"])
+
+
+func test_foreign_mod_cannot_raise_custom_event() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		script.register_event("protected_event")
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		script.on_init(function()
+			script.raise_event("core:protected_event", {})
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+	assert_false(runtime.activate())
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
+
+
+func test_custom_event_cannot_be_raised_during_setup() -> void:
+	_write_file("core", "control.lua", """
+		local event_id = script.register_event("early_event")
+		script.raise_event(event_id, {})
+	""")
+
+	assert_false(runtime.prepare(_resolve_mods()))
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
+
+
+func test_custom_event_cannot_be_raised_during_on_load() -> void:
+	_write_file("core", "control.lua", """
+		local event_id = script.register_event("load_event")
+
+		script.on_load(function()
+			script.raise_event(event_id, {})
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_false(runtime.activate({}, ["core"]))
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
+
+
+func test_custom_events_are_queued_without_reentrant_execution() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		local second = script.register_event("second")
+
+		script.on_event("first", function(event)
+			game.record("core:first:start")
+			script.raise_event(second, {})
+			game.record("core:first:end")
+		end)
+
+		script.on_event(second, function(event)
+			game.record("core:second")
+		end)
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		script.on_event("first", function(event)
+			game.record("demo_a:first")
+		end)
+
+		script.on_event("core:second", function(event)
+			game.record("demo_a:second")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+	assert_true(runtime.emit_event("first"))
+
+	assert_eq(lifecycle_calls, [
+		"core:first:start",
+		"core:first:end",
+		"demo_a:first",
+		"core:second",
+		"demo_a:second"
+	])
+
+
+func test_circular_custom_event_payload_is_rejected() -> void:
+	_write_file("core", "control.lua", """
+		local event_id = script.register_event("circular")
+
+		script.on_init(function()
+			local data = {}
+			data.self = data
+			script.raise_event(event_id, data)
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_false(runtime.activate())
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
+	assert_true(str(runtime.get_errors()).contains("Circular"))
+
+
+func test_custom_event_nested_payload() -> void:
+	_write_file("core", "control.lua", """
+		local event_id = script.register_event("nested")
+
+		script.on_event(event_id, function(event)
+			assert(event.details.score == 7)
+			assert(event.details.active == true)
+			game.record("nested_ok")
+		end)
+
+		script.on_init(function()
+			script.raise_event(event_id, {
+				details = {
+					score = 7,
+					active = true
+				}
+			})
+		end)
+	""")
+	print(_record_lifecycle_call)
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+	assert_eq(lifecycle_calls, ["nested_ok"])

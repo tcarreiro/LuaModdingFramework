@@ -21,6 +21,7 @@ var _executed_instructions: int = 0
 var _abort_reason: String = ""
 var _running: bool = false
 
+var _active_coroutine: LuaCoroutine
 
 static func restrict_base_functions(lua_state: LuaState) -> void:
 	for function_name in ["dofile", "loadfile", "load", "collectgarbage"]:
@@ -87,6 +88,7 @@ func _run_protected(lua_state: LuaState, callback: LuaFunction, arguments: Array
 	if coroutine == null:
 		last_error = "Failed to create Lua coroutine."
 	else:
+		_active_coroutine = coroutine
 		if lua_state.get_memory_used() > max_memory_bytes:
 			last_error = "Lua memory limit exceeded."
 		else:
@@ -109,6 +111,7 @@ func _run_protected(lua_state: LuaState, callback: LuaFunction, arguments: Array
 				last_result = result
 				success = true
 
+	#_active_coroutine = null
 	_active_state = null
 	_running = false
 
@@ -116,6 +119,12 @@ func _run_protected(lua_state: LuaState, callback: LuaFunction, arguments: Array
 		last_error = "%s: %s" % [context, last_error]
 
 	return success
+
+
+func get_active_coroutine() -> LuaCoroutine:
+	if not _running:
+		return null
+	return _active_coroutine
 
 
 func _on_hook(_debug: LuaDebug) -> int:

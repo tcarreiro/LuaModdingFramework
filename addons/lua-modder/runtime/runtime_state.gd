@@ -8,6 +8,8 @@ enum Phase {
 	CLOSED
 }
 
+const MAX_CUSTOM_EVENTS := 1024
+
 var errors: Array[String] = []
 var mod_id: String
 
@@ -21,6 +23,10 @@ var _execution_guard := LuaExecutionGuard.new()
 var _storage: LuaTable
 var _storage_codec := RuntimeStorage.new()
 var _event_handlers: Dictionary = {}
+var _custom_events: Dictionary = {}
+var _custom_event_sink: Callable
+var _inside_on_load := false
+var _handler_coroutines: Dictionary = {}
 
 
 func _init(id: String) -> void:
@@ -53,6 +59,8 @@ func start(mod_versions: Dictionary = {}) -> bool:
 		"on_load": _lua_state.create_function(_lua_on_load),
 		"on_configuration_changed": _lua_state.create_function(_lua_on_configuration_changed),
 		"on_event": _lua_state.create_function(_lua_on_event),
+		"register_event": _lua_state.create_function(_lua_register_event),
+		"raise_event": _lua_state.create_function(_lua_raise_event),
 	}
 	
 	for function_name in _script_functions:
@@ -132,6 +140,7 @@ func run_lifecycle(handler_name: String, data: Dictionary = {}) -> bool:
 		return true
 	
 	var is_load := handler_name == "on_load"
+	_inside_on_load = is_load
 	var storage_before: Dictionary = {}
 	if is_load:
 		storage_before = _storage_codec.capture(_lua_state, _storage)
@@ -151,6 +160,7 @@ func run_lifecycle(handler_name: String, data: Dictionary = {}) -> bool:
 		arguments,
 		"%s/%s" % [mod_id, handler_name]
 	)
+	_inside_on_load = false
 
 	if is_load:
 		if _lua_state.globals.rawget("game") != null:
@@ -193,15 +203,20 @@ func get_errors() -> Array[String]:
 
 func close() -> void:
 	_lifecycle_handlers.clear()
-	_script_functions.clear()
 	_event_handlers.clear()
+	_handler_coroutines.clear()
+	_script_functions.clear()
+	_custom_events.clear()
+	_custom_event_sink = Callable()
 	_script_api = null
 	_storage = null
 	_game_api = null
 	_lua_state = null
 	_phase = Phase.CLOSED
+	_inside_on_load = false
 
 
+#region Exposed APIs
 func _lua_on_init(handler: Variant) -> bool:
 	return _register_lifecycle_handler("on_init", handler)
 
@@ -218,15 +233,15 @@ func _lua_on_event(event_ids: Variant, handler: Variant) -> bool:
 	if _phase != Phase.SETUP and _phase != Phase.ACTIVE:
 		errors.append("Mod '%s' cannot register events in the current phase." % mod_id)
 		return false
-	
+
 	if handler != null and not handler is LuaFunction:
 		errors.append("Mod '%s' registered an invalid event handler." % mod_id)
 		return false
-	
+
 	if handler is LuaFunction and handler.get_lua_state() != _lua_state:
 		errors.append("Mod '%s' registered a handler from another LuaState." % mod_id)
 		return false
-	
+
 	var raw_ids: Array = []
 	if typeof(event_ids) == TYPE_STRING:
 		raw_ids.append(event_ids)
@@ -243,7 +258,6 @@ func _lua_on_event(event_ids: Variant, handler: Variant) -> bool:
 		return false
 
 	var names: Array[String] = []
-
 	for value in raw_ids:
 		if typeof(value) != TYPE_STRING or String(value).strip_edges().is_empty():
 			errors.append("Mod '%s' provided an invalid event name." % mod_id)
@@ -252,33 +266,204 @@ func _lua_on_event(event_ids: Variant, handler: Variant) -> bool:
 		if value not in names:
 			names.append(value)
 
+	var coroutine: LuaCoroutine
+	if handler != null:
+		coroutine = _execution_guard.get_active_coroutine()
+		if coroutine == null:
+			errors.append("Cannot register event handler outside protected Lua execution.")
+			return false
+
 	for event_name in names:
+		var key := "event:" + event_name
+
 		if handler == null:
 			_event_handlers.erase(event_name)
+			_handler_coroutines.erase(key)
 		else:
 			_event_handlers[event_name] = handler
+			_handler_coroutines[key] = coroutine
 
 	return true
+
+
+func _lua_register_event(local_name: Variant) -> String:
+	if _phase != Phase.SETUP:
+		errors.append("Mod '%s' can only register custom events during setup." % mod_id)
+		return ""
+	
+	if typeof(local_name) != TYPE_STRING:
+		errors.append("Mod '%s' provided an invalid custom event name." % mod_id)
+		return ""
+	
+	var name := String(local_name)
+	var pattern := RegEx.create_from_string("^[A-Za-z_][A-Za-z0-9_.-]*$")
+	if name.length() > 100 or pattern.search(name) == null:
+		errors.append("Mod '%s' provided an invalid custom event name '%s'." % [mod_id, name])
+		return ""
+	
+	var event_name := "%s:%s" % [mod_id, name]
+	if not _custom_events.has(event_name) and _custom_events.size() >= MAX_CUSTOM_EVENTS:
+		errors.append("Mod '%s' exceeded its custom event limit." % mod_id)
+		return ""
+	
+	_custom_events[event_name] = true
+	return event_name
+
+
+func _lua_raise_event(event_name: Variant, payload: Variant) -> bool:
+	if _phase != Phase.ACTIVE or _inside_on_load:
+		errors.append("Mod '%s' cannot raise custom events in this phase." % mod_id)
+		return false
+	
+	if typeof(event_name) != TYPE_STRING or not _custom_events.has(event_name):
+		errors.append("Mod '%s' cannot raise undeclared or foreign event '%s'." % [mod_id, str(event_name)])
+		return false
+	
+	if not payload is LuaTable:
+		errors.append("Custom event '%s' requires a Lua table payload." % event_name)
+		return false
+	
+	if not _custom_event_sink.is_valid():
+		errors.append("Mod '%s' has no custom event dispatcher." % mod_id)
+		return false
+	
+	var visited: Dictionary = {}
+	var counter: Array[int] = [0]
+	var data: Variant = _read_custom_event_value(payload, 0, visited, counter)
+	if not errors.is_empty():
+		return false
+	
+	if not data is Dictionary:
+		errors.append("Custom event payload must be a table.")
+		return false
+	
+	if data.has("name") or data.has("mod_name"):
+		errors.append("Custom event payload contains reserved fields.")
+		return false
+	
+	if not _custom_event_sink.call(mod_id, String(event_name), data):
+		errors.append("Mod '%s' failed to enqueue custom event '%s'." % [mod_id, event_name])
+		return false
+	
+	return true
+#endregion
 
 
 func has_event_handler(event_name: String) -> bool:
 	return _event_handlers.has(event_name)
 
 
+func set_custom_event_sink(sink: Callable) -> bool:
+	if _phase != Phase.CREATED or not sink.is_valid():
+		errors.append("Invalid custom event sink for mod '%s'." % mod_id)
+		return false
+	_custom_event_sink = sink
+	return true
+
+
+func get_custom_events() -> Array[String]:
+	var result: Array[String] = []
+	for event_name in _custom_events:
+		result.append(event_name)
+	return result
+
+
+func restore_storage(snapshot: Dictionary = {}) -> bool:
+	if _phase != Phase.ACTIVE or not errors.is_empty():
+		errors.append("Mod '%s' cannot restore storage outside activation." % mod_id)
+		return false
+
+	var restored := _storage_codec.restore(_lua_state, snapshot)
+
+	if restored == null:
+		for error in _storage_codec.errors:
+			errors.append("Mod '%s': %s" % [mod_id, error])
+		return false
+
+	_storage = restored
+	_lua_state.globals.rawset("storage", _storage)
+	return true
+
+
+func snapshot_storage() -> Dictionary:
+	if _phase != Phase.ACTIVE or not errors.is_empty():
+		errors.append("Mod '%s' cannot snapshot storage." % mod_id)
+		return {}
+	
+	if not _validate_storage_api():
+		return {}
+	
+	var snapshot := _storage_codec.capture(_lua_state, _storage)
+	if not _storage_codec.errors.is_empty():
+		for error in _storage_codec.errors:
+			errors.append("Mod '%s': %s" % [mod_id, error])
+		return {}
+	
+	return snapshot
+
+
+
+func dispatch_event(event_name: String, data: Dictionary = {}) -> bool:
+	if _phase != Phase.ACTIVE or not errors.is_empty():
+		return false
+	
+	if not _event_handlers.has(event_name):
+		return true
+	
+	var event_data := data.duplicate(true)
+	event_data["name"] = event_name
+	var lua_data := LuaUtils.to_lua_value(_lua_state, event_data)
+	var callback: LuaFunction = _event_handlers[event_name]
+	var owner_coroutine: LuaCoroutine = _handler_coroutines.get("event:" + event_name)
+	var success := _execution_guard.invoke(
+		_lua_state,
+		callback,
+		[lua_data],
+		"%s/event:%s" % [mod_id, event_name]
+	)
+	if not success:
+		errors.append("Lua error in mod '%s' (event '%s'): %s" % [
+			mod_id, event_name, _execution_guard.last_error
+		])
+	
+	var current_game: Variant = _lua_state.globals.rawget("game")
+	if not _same_lua_object(current_game, _game_api):
+		errors.append("Mod '%s' replaced the game API during event '%s'." % [mod_id, event_name])
+		_lua_state.globals.rawset("game", _game_api)
+	
+	_validate_script_api()
+	_validate_storage_api()
+	
+	var valid := success and errors.is_empty()
+	callback = null
+	owner_coroutine = null
+	return valid
+
+
+
+#region private methods
 func _register_lifecycle_handler(handler_name: String, handler: Variant) -> bool:
 	if _phase != Phase.SETUP:
 		errors.append("Lifecycle callbacks can only be registered during setup.")
 		return false
-
+	
 	if handler != null and not handler is LuaFunction:
 		errors.append("Handler '%s' must be a Lua function or nil." % handler_name)
 		return false
-
+	
+	var key := "lifecycle:" + handler_name
 	if handler == null:
 		_lifecycle_handlers.erase(handler_name)
-	else:
-		_lifecycle_handlers[handler_name] = handler
-
+		_handler_coroutines.erase(key)
+		return true
+	
+	var coroutine := _execution_guard.get_active_coroutine()
+	if coroutine == null:
+		errors.append("Cannot register lifecycle handler outside protected Lua execution.")
+		return false
+	
+	_lifecycle_handlers[handler_name] = handler
+	_handler_coroutines[key] = coroutine
 	return true
 
 
@@ -313,47 +498,12 @@ func _validate_script_api() -> bool:
 func _validate_setup_api() -> bool:
 	if not _validate_script_api():
 		return false
-
+	
 	if _lua_state.globals.rawget("game") != null:
 		errors.append("Mod '%s' attempted to define game during setup." % mod_id)
 		return false
-
+	
 	return _validate_storage_api()
-
-
-func restore_storage(snapshot: Dictionary = {}) -> bool:
-	if _phase != Phase.ACTIVE or not errors.is_empty():
-		errors.append("Mod '%s' cannot restore storage outside activation." % mod_id)
-		return false
-
-	var restored := _storage_codec.restore(_lua_state, snapshot)
-
-	if restored == null:
-		for error in _storage_codec.errors:
-			errors.append("Mod '%s': %s" % [mod_id, error])
-		return false
-
-	_storage = restored
-	_lua_state.globals.rawset("storage", _storage)
-	return true
-
-
-func snapshot_storage() -> Dictionary:
-	if _phase != Phase.ACTIVE or not errors.is_empty():
-		errors.append("Mod '%s' cannot snapshot storage." % mod_id)
-		return {}
-
-	if not _validate_storage_api():
-		return {}
-
-	var snapshot := _storage_codec.capture(_lua_state, _storage)
-
-	if not _storage_codec.errors.is_empty():
-		for error in _storage_codec.errors:
-			errors.append("Mod '%s': %s" % [mod_id, error])
-		return {}
-
-	return snapshot
 
 
 func _validate_storage_api() -> bool:
@@ -364,34 +514,66 @@ func _validate_storage_api() -> bool:
 	return true
 
 
-func dispatch_event(event_name: String, data: Dictionary = {}) -> bool:
-	if _phase != Phase.ACTIVE or not errors.is_empty():
-		return false
+func _read_custom_event_value(value: Variant, depth: int, visited: Dictionary, counter: Array[int]) -> Variant:
+	counter[0] += 1
+	if depth > 32 or counter[0] > 10_000:
+		errors.append("Custom event payload exceeds its size or depth limits.")
+		return null
 	
-	if not _event_handlers.has(event_name):
-		return true
+	if value is LuaTable:
+		if value.get_lua_state() != _lua_state:
+			errors.append("Custom event payload contains a foreign Lua table.")
+			return null
 	
-	var event_data := data.duplicate(true)
-	event_data["name"] = event_name
-	var lua_data := LuaUtils.to_lua_value(_lua_state, event_data)
-	var callback: LuaFunction = _event_handlers[event_name]
-	var success := _execution_guard.invoke(
-		_lua_state,
-		callback,
-		[lua_data],
-		"%s/event:%s" % [mod_id, event_name]
-	)
+		var pointer: int = value.get_pointer_value()
+		if visited.has(pointer):
+			errors.append("Circular tables are not supported in custom event payloads.")
+			return null
 	
-	if not success:
-		errors.append("Lua error in mod '%s' (event '%s'): %s" % [
-			mod_id, event_name, _execution_guard.last_error
-		])
+		visited[pointer] = true
+		var result: Dictionary = {}
+		var source: Dictionary = value.to_dictionary()
+		for key in source:
+			if typeof(key) != TYPE_STRING and typeof(key) != TYPE_INT:
+				errors.append("Unsupported custom event table key.")
+				break
 	
-	var current_game: Variant = _lua_state.globals.rawget("game")
-	if not _same_lua_object(current_game, _game_api):
-		errors.append("Mod '%s' replaced the game API during event '%s'." % [mod_id, event_name])
-		_lua_state.globals.rawset("game", _game_api)
+			result[key] = _read_custom_event_value(source[key], depth + 1, visited, counter)
+			if not errors.is_empty():
+				break
 	
-	_validate_script_api()
-	_validate_storage_api()
-	return success and errors.is_empty()
+		visited.erase(pointer)
+		return result
+	
+	if value is Dictionary:
+		var result: Dictionary = {}
+		for key in value:
+			if typeof(key) != TYPE_STRING and typeof(key) != TYPE_INT:
+				errors.append("Unsupported custom event dictionary key.")
+				return null
+	
+			result[key] = _read_custom_event_value(value[key], depth + 1, visited, counter)
+			if not errors.is_empty():
+				return null
+	
+		return result
+	
+	if value is Array:
+		var result: Array = []
+		for element in value:
+			result.append(_read_custom_event_value(element, depth + 1, visited, counter))
+	
+			if not errors.is_empty():
+				return null
+		return result
+	
+	match typeof(value):
+		TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_STRING:
+			return value
+		TYPE_FLOAT:
+			if is_finite(value):
+				return value
+	
+	errors.append("Unsupported custom event payload value.")
+	return null
+#endregion

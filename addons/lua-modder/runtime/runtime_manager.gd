@@ -8,11 +8,17 @@ enum Phase {
 	CLOSED
 }
 
+const MAX_QUEUED_EVENTS := 2048
+const MAX_EVENTS_PER_FLUSH := 4096
+
 var errors: Array[String] = []
 
 var _phase: int = Phase.CREATED
 var _states: Dictionary[String, RuntimeState] = {}
 var _ordered_ids: Array[String] = []
+var _custom_event_owners: Dictionary = {}
+var _event_queue: Array[Dictionary] = []
+var _draining_events := false
 
 func prepare(mods: Array[ModManifest]) -> bool:
 	if _phase != Phase.CREATED:
@@ -46,6 +52,11 @@ func prepare(mods: Array[ModManifest]) -> bool:
 		_states[manifest.id] = state
 		_ordered_ids.append(manifest.id)
 	
+		if not state.set_custom_event_sink(Callable(self, "_enqueue_custom_event")):
+			errors.append_array(state.get_errors())
+			_fail()
+			return false
+	
 		if not state.start(versions):
 			errors.append_array(state.get_errors())
 			_fail()
@@ -69,6 +80,15 @@ func prepare(mods: Array[ModManifest]) -> bool:
 			errors.append("Failed to finish Runtime setup for mod '%s'." % mod_id)
 			_fail()
 			return false
+	
+	for mod_id in _ordered_ids:
+		var state: RuntimeState = _states[mod_id]
+		for event_name in state.get_custom_events():
+			if _custom_event_owners.has(event_name):
+				errors.append("Duplicate custom event '%s'." % event_name)
+				_fail()
+				return false
+			_custom_event_owners[event_name] = mod_id
 	
 	_phase = Phase.PREPARED
 	return true
@@ -135,7 +155,7 @@ func activate(game_functions: Dictionary = {}, existing_mod_ids: Array[String] =
 				return false
 	
 	_phase = Phase.ACTIVE
-	return true
+	return _flush_event_queue()
 
 
 func snapshot_storage() -> Dictionary:
@@ -159,54 +179,10 @@ func emit_event(event_name: String, data: Dictionary = {}) -> bool:
 		errors.append("Runtime Stage must be active to emit events.")
 		return false
 	
-	if event_name.strip_edges().is_empty():
-		errors.append("Cannot emit an event without a name.")
+	if not _queue_event(event_name, data, ""):
 		return false
 	
-	if data.has("name"):
-		errors.append("Event payload cannot override the reserved 'name' field.")
-		return false
-	
-	var visited: Array[int] = [0]
-	if not _is_valid_event_value(data, 0, visited):
-		errors.append("Event '%s' contains unsupported data or exceeds its limits." % event_name)
-		return false
-	
-	for mod_id in _ordered_ids:
-		var state: RuntimeState = _states[mod_id]
-		if not state.dispatch_event(event_name, data):
-			errors.append_array(state.get_errors())
-			_fail()
-			return false
-	return true
-
-
-func _is_valid_event_value(value: Variant, depth: int, visited: Array[int]) -> bool:
-	if depth > 32:
-		return false
-	
-	visited[0] += 1
-	if visited[0] > 10_000:
-		return false
-	
-	match typeof(value):
-		TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_STRING:
-			return true
-		TYPE_FLOAT:
-			return is_finite(value)
-		TYPE_ARRAY:
-			for element in value:
-				if not _is_valid_event_value(element, depth + 1, visited):
-					return false
-			return true
-		TYPE_DICTIONARY:
-			for key in value:
-				if typeof(key) != TYPE_STRING and typeof(key) != TYPE_INT:
-					return false
-				if not _is_valid_event_value(value[key], depth + 1, visited):
-					return false
-			return true
-	return false
+	return _flush_event_queue()
 
 
 func get_phase() -> int:
@@ -241,6 +217,110 @@ func _fail() -> void:
 func _release_states() -> void:
 	for state in _states.values():
 		state.close()
-
+	
 	_states.clear()
 	_ordered_ids.clear()
+	_custom_event_owners.clear()
+	_event_queue.clear()
+	_draining_events = false
+
+
+func _is_valid_event_value(value: Variant, depth: int, visited: Array[int]) -> bool:
+	if depth > 32:
+		return false
+	
+	visited[0] += 1
+	if visited[0] > 10_000:
+		return false
+	
+	match typeof(value):
+		TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_STRING:
+			return true
+		TYPE_FLOAT:
+			return is_finite(value)
+		TYPE_ARRAY:
+			for element in value:
+				if not _is_valid_event_value(element, depth + 1, visited):
+					return false
+			return true
+		TYPE_DICTIONARY:
+			for key in value:
+				if typeof(key) != TYPE_STRING and typeof(key) != TYPE_INT:
+					return false
+				if not _is_valid_event_value(value[key], depth + 1, visited):
+					return false
+			return true
+	return false
+
+
+func _enqueue_custom_event(mod_id: String, event_name: String, data: Dictionary) -> bool:
+	if _phase != Phase.PREPARED and _phase != Phase.ACTIVE:
+		errors.append("Custom events cannot be raised in this runtime phase.")
+		return false
+	
+	if _custom_event_owners.get(event_name, "") != mod_id:
+		errors.append("Mod '%s' does not own custom event '%s'." % [mod_id, event_name])
+		return false
+	
+	return _queue_event(event_name, data, mod_id)
+
+
+func _queue_event(event_name: String, data: Dictionary, raised_by: String) -> bool:
+	if event_name.strip_edges().is_empty():
+		errors.append("Event name cannot be empty.")
+		return false
+	
+	if data.has("name") or data.has("mod_name"):
+		errors.append("Event payload contains reserved fields.")
+		return false
+	
+	var visited: Array[int] = [0]
+	if not _is_valid_event_value(data, 0, visited):
+		errors.append("Event '%s' contains unsupported data." % event_name)
+		return false
+	
+	if _event_queue.size() >= MAX_QUEUED_EVENTS:
+		errors.append("Runtime event queue limit exceeded.")
+		return false
+	
+	_event_queue.append({
+		"name": event_name,
+		"data": data.duplicate(true),
+		"raised_by": raised_by
+	})
+	
+	return true
+
+
+func _flush_event_queue() -> bool:
+	if _draining_events:
+		return true
+	
+	_draining_events = true
+	var processed := 0
+	while not _event_queue.is_empty():
+		processed += 1
+	
+		if processed > MAX_EVENTS_PER_FLUSH:
+			errors.append("Runtime event dispatch limit exceeded.")
+			_draining_events = false
+			_fail()
+			return false
+	
+		var queued: Dictionary = _event_queue.pop_front()
+		var event_name: String = queued["name"]
+		var event_data: Dictionary = queued["data"]
+		var raised_by: String = queued["raised_by"]
+		if not raised_by.is_empty():
+			event_data["mod_name"] = raised_by
+	
+		for mod_id in _ordered_ids:
+			var state: RuntimeState = _states[mod_id]
+			if not state.dispatch_event(event_name, event_data):
+				errors.append_array(state.get_errors())
+				_draining_events = false
+				_fail()
+				return false
+	
+	_draining_events = false
+	return true
