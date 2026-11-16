@@ -18,6 +18,8 @@ var _game_api: LuaTable
 var _script_functions: Dictionary = {}
 var _lifecycle_handlers: Dictionary = {}
 var _execution_guard := LuaExecutionGuard.new()
+var _storage: LuaTable
+var _storage_codec := RuntimeStorage.new()
 
 
 func _init(id: String) -> void:
@@ -28,11 +30,11 @@ func start(mod_versions: Dictionary = {}) -> bool:
 	if _phase != Phase.CREATED:
 		errors.append("RuntimeState '%s' cannot be started again." % mod_id)
 		return false
-
+	
 	if mod_id.strip_edges().is_empty():
 		errors.append("RuntimeState requires a mod ID.")
 		return false
-
+	
 	_lua_state = LuaState.new()
 	_lua_state.open_libraries(
 		LuaState.LUA_BASE |
@@ -40,23 +42,23 @@ func start(mod_versions: Dictionary = {}) -> bool:
 		LuaState.LUA_TABLE |
 		LuaState.LUA_MATH
 	)
-
+	
 	LuaExecutionGuard.restrict_base_functions(_lua_state)
-
 	_script_api = _lua_state.create_table()
+	_storage = _lua_state.create_table()
+	_lua_state.globals["storage"] = _storage
 	_script_functions = {
 		"on_init": _lua_state.create_function(_lua_on_init),
 		"on_load": _lua_state.create_function(_lua_on_load),
 		"on_configuration_changed": _lua_state.create_function(_lua_on_configuration_changed)
 	}
-
+	
 	for function_name in _script_functions:
 		_script_api[function_name] = _script_functions[function_name]
-
 	_lua_state.globals["script"] = _script_api
 	_lua_state.globals["mods"] = LuaUtils.to_lua_value(_lua_state, mod_versions)
 	_lua_state.globals["game"] = null
-
+	
 	_phase = Phase.SETUP
 	return true
 
@@ -65,28 +67,26 @@ func execute_control(source: String, chunk_name: String = "") -> bool:
 	if _phase != Phase.SETUP:
 		errors.append("Mod '%s' cannot execute control.lua outside setup." % mod_id)
 		return false
-
+	
 	if not errors.is_empty():
 		return false
-
+	
 	var success := _execution_guard.execute(_lua_state, source, chunk_name)
-
 	if not success:
 		errors.append("Lua error in mod '%s' (%s): %s" % [
 			mod_id, chunk_name, _execution_guard.last_error
 		])
 		return false
-
+	
 	if not errors.is_empty():
 		return false
-
+	
 	return _validate_setup_api()
 
 
 func finish_setup() -> bool:
 	if _phase != Phase.SETUP or not errors.is_empty():
 		return false
-
 	_phase = Phase.PREPARED
 	return true
 
@@ -95,23 +95,21 @@ func activate(game_functions: Dictionary = {}) -> bool:
 	if _phase != Phase.PREPARED:
 		errors.append("Mod '%s' cannot activate before setup is complete." % mod_id)
 		return false
-
+	
 	for function_name in game_functions:
 		if typeof(function_name) != TYPE_STRING:
 			errors.append("Runtime API function names must be strings.")
 			return false
-
+	
 		var callback: Variant = game_functions[function_name]
-
 		if not callback is Callable or not callback.is_valid():
 			errors.append("Invalid runtime API function '%s'." % function_name)
 			return false
-
+	
 	_game_api = _lua_state.create_table()
-
 	for function_name in game_functions:
 		_game_api[function_name] = _lua_state.create_function(game_functions[function_name])
-
+	
 	_lua_state.globals["game"] = _game_api
 	_phase = Phase.ACTIVE
 	return true
@@ -120,26 +118,31 @@ func activate(game_functions: Dictionary = {}) -> bool:
 func run_lifecycle(handler_name: String, data: Dictionary = {}) -> bool:
 	if _phase != Phase.ACTIVE or not errors.is_empty():
 		return false
-
+	
 	if handler_name not in ["on_init", "on_load", "on_configuration_changed"]:
 		errors.append("Unknown lifecycle callback '%s' for mod '%s'." % [handler_name, mod_id])
 		return false
-
+	
+	if not _validate_storage_api():
+		return false
+	
 	if not _lifecycle_handlers.has(handler_name):
 		return true
-
+	
 	var is_load := handler_name == "on_load"
-
+	var storage_before: Dictionary = {}
 	if is_load:
+		storage_before = _storage_codec.capture(_lua_state, _storage)
+		if not _storage_codec.errors.is_empty():
+			errors.append_array(_storage_codec.errors)
+			return false
 		_lua_state.globals.rawset("game", null)
-
+	
 	var arguments: Array = []
-
 	if handler_name == "on_configuration_changed":
 		arguments.append(LuaUtils.to_lua_value(_lua_state, data))
-
+	
 	var callback: LuaFunction = _lifecycle_handlers[handler_name]
-
 	var success := _execution_guard.invoke(
 		_lua_state,
 		callback,
@@ -150,22 +153,29 @@ func run_lifecycle(handler_name: String, data: Dictionary = {}) -> bool:
 	if is_load:
 		if _lua_state.globals.rawget("game") != null:
 			errors.append("Mod '%s' defined game during on_load." % mod_id)
-
 		_lua_state.globals.rawset("game", _game_api)
 	else:
 		var current_game: Variant = _lua_state.globals.rawget("game")
-
 		if not _same_lua_object(current_game, _game_api):
 			errors.append("Mod '%s' replaced the game API during %s." % [mod_id, handler_name])
 			_lua_state.globals.rawset("game", _game_api)
-
+	
 	if not success:
 		errors.append("Lua error in mod '%s' (%s): %s" % [
 			mod_id, handler_name, _execution_guard.last_error
 		])
-
+	
 	_validate_script_api()
+	_validate_storage_api()
+	if is_load:
+		var storage_after := _storage_codec.capture(_lua_state, _storage)
+		if not _storage_codec.errors.is_empty():
+			errors.append_array(_storage_codec.errors)
+		elif storage_before != storage_after:
+			errors.append("Mod '%s' modified storage during on_load." % mod_id)
+	
 	return success and errors.is_empty()
+
 
 
 
@@ -185,6 +195,7 @@ func close() -> void:
 	_lifecycle_handlers.clear()
 	_script_functions.clear()
 	_script_api = null
+	_storage = null
 	_game_api = null
 	_lua_state = null
 	_phase = Phase.CLOSED
@@ -255,4 +266,48 @@ func _validate_setup_api() -> bool:
 		errors.append("Mod '%s' attempted to define game during setup." % mod_id)
 		return false
 
+	return _validate_storage_api()
+
+
+
+func restore_storage(snapshot: Dictionary = {}) -> bool:
+	if _phase != Phase.ACTIVE or not errors.is_empty():
+		errors.append("Mod '%s' cannot restore storage outside activation." % mod_id)
+		return false
+
+	var restored := _storage_codec.restore(_lua_state, snapshot)
+
+	if restored == null:
+		for error in _storage_codec.errors:
+			errors.append("Mod '%s': %s" % [mod_id, error])
+		return false
+
+	_storage = restored
+	_lua_state.globals.rawset("storage", _storage)
+	return true
+
+
+func snapshot_storage() -> Dictionary:
+	if _phase != Phase.ACTIVE or not errors.is_empty():
+		errors.append("Mod '%s' cannot snapshot storage." % mod_id)
+		return {}
+
+	if not _validate_storage_api():
+		return {}
+
+	var snapshot := _storage_codec.capture(_lua_state, _storage)
+
+	if not _storage_codec.errors.is_empty():
+		for error in _storage_codec.errors:
+			errors.append("Mod '%s': %s" % [mod_id, error])
+		return {}
+
+	return snapshot
+
+
+func _validate_storage_api() -> bool:
+	var current: Variant = _lua_state.globals.rawget("storage")
+	if not current is LuaTable or not _same_lua_object(current, _storage):
+		errors.append("Mod '%s' replaced the storage table." % mod_id)
+		return false
 	return true

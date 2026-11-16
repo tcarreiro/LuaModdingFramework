@@ -78,17 +78,18 @@ func prepare(mods: Array[ModManifest]) -> bool:
 	return true
 
 
-func activate(game_functions: Dictionary = {}, existing_mod_ids: Array[String] = [], configuration_changes: Variant = null) -> bool:
+
+func activate(game_functions: Dictionary = {}, existing_mod_ids: Array[String] = [], configuration_changes: Variant = null, saved_storage: Dictionary = {}) -> bool:
 	if _phase != Phase.PREPARED:
 		errors.append("Runtime Stage must be prepared before activation.")
 		return false
-
+	
 	# Validate the entire consumer API before exposing it to any mod.
 	for function_name in game_functions:
 		if typeof(function_name) != TYPE_STRING or String(function_name).strip_edges().is_empty():
 			errors.append("Runtime API function names must be non-empty strings.")
 			return false
-
+	
 		var callback: Variant = game_functions[function_name]
 		if not callback is Callable or not callback.is_valid():
 			errors.append("Invalid runtime API function '%s'." % function_name)
@@ -97,15 +98,31 @@ func activate(game_functions: Dictionary = {}, existing_mod_ids: Array[String] =
 	if configuration_changes != null and typeof(configuration_changes) != TYPE_DICTIONARY:
 		errors.append("Configuration changes must be a Dictionary or null.")
 		return false
-
+	
 	for mod_id in _ordered_ids:
 		var state: RuntimeState = _states[mod_id]
 		if not state.activate(game_functions):
 			errors.append_array(state.get_errors())
 			_fail()
 			return false
-
-	# on_init and on_load area mutually exclusive
+	
+	for mod_id in _ordered_ids:
+		if mod_id not in existing_mod_ids:
+			continue
+	
+		var snapshot: Variant = saved_storage.get(mod_id, {})
+		if not snapshot is Dictionary:
+			errors.append("Invalid storage snapshot for mod '%s'." % mod_id)
+			_fail()
+			return false
+	
+		var state: RuntimeState = _states[mod_id]
+		if not state.restore_storage(snapshot):
+			errors.append_array(state.get_errors())
+			_fail()
+			return false
+	
+	# on_init and on_load are mutually exclusive
 	for mod_id in _ordered_ids:
 		var state: RuntimeState = _states[mod_id]
 		var callback_name := "on_load" if mod_id in existing_mod_ids else "on_init"
@@ -113,7 +130,7 @@ func activate(game_functions: Dictionary = {}, existing_mod_ids: Array[String] =
 			errors.append_array(state.get_errors())
 			_fail()
 			return false
-
+	
 	if configuration_changes != null:
 		for mod_id in _ordered_ids:
 			var state: RuntimeState = _states[mod_id]
@@ -121,9 +138,26 @@ func activate(game_functions: Dictionary = {}, existing_mod_ids: Array[String] =
 				errors.append_array(state.get_errors())
 				_fail()
 				return false
-
+	
 	_phase = Phase.ACTIVE
 	return true
+
+
+func snapshot_storage() -> Dictionary:
+	if _phase != Phase.ACTIVE:
+		errors.append("Runtime Stage must be active to snapshot storage.")
+		return {}
+	
+	var result: Dictionary = {}
+	for mod_id in _ordered_ids:
+		var state: RuntimeState = _states[mod_id]
+		var snapshot := state.snapshot_storage()
+		if snapshot.is_empty():
+			errors.append_array(state.get_errors())
+			return {}
+		result[mod_id] = snapshot
+	return result
+
 
 
 func get_phase() -> int:

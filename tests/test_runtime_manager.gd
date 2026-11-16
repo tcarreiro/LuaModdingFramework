@@ -421,3 +421,96 @@ func test_lifecycle_does_not_create_internal_globals() -> void:
 	assert_true(runtime.prepare(_resolve_mods()))
 	assert_true(runtime.activate({"record": _record_lifecycle_call}))
 	assert_eq(lifecycle_calls, ["initialized"])
+
+
+func test_storage_is_saved_and_restored_before_on_load() -> void:
+	_write_file("core", "control.lua", """
+		assert(storage.expeditions == nil)
+
+		script.on_init(function()
+			storage.expeditions = 17
+		end)
+
+		script.on_load(function()
+			assert(game == nil)
+			assert(storage.expeditions == 17)
+		end)
+
+		script.on_configuration_changed(function()
+			game.record("restored:" .. storage.expeditions)
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate())
+
+	var saved_storage := runtime.snapshot_storage()
+
+	assert_true(saved_storage.has("core"))
+
+	runtime.close()
+	runtime = RuntimeManager.new()
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate(
+		{"record": _record_lifecycle_call},
+		["core"],
+		{},
+		saved_storage
+	))
+
+	assert_eq(lifecycle_calls, ["restored:17"])
+
+
+func test_on_load_cannot_modify_storage() -> void:
+	_write_file("core", "control.lua", """
+		script.on_init(function()
+			storage.value = 10
+		end)
+
+		script.on_load(function()
+			storage.value = 20
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate())
+
+	var saved_storage := runtime.snapshot_storage()
+
+	runtime.close()
+	runtime = RuntimeManager.new()
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_false(runtime.activate({}, ["core"], null, saved_storage))
+
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
+	assert_true(str(runtime.get_errors()).contains("modified storage during on_load"))
+
+
+func test_storage_is_isolated_between_mods() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		script.on_init(function()
+			storage.owner = "core"
+		end)
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		assert(storage.owner == nil)
+
+		script.on_init(function()
+			assert(storage.owner == nil)
+			storage.owner = "demo_a"
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+	assert_true(runtime.activate())
+
+	var saved_storage := runtime.snapshot_storage()
+
+	assert_true(saved_storage.has("core"))
+	assert_true(saved_storage.has("demo_a"))
+	assert_ne(saved_storage["core"], saved_storage["demo_a"])
