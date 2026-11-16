@@ -514,3 +514,219 @@ func test_storage_is_isolated_between_mods() -> void:
 	assert_true(saved_storage.has("core"))
 	assert_true(saved_storage.has("demo_a"))
 	assert_ne(saved_storage["core"], saved_storage["demo_a"])
+
+
+func test_events_follow_mod_order() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		script.on_event("run_started", function(event)
+			game.record("core")
+		end)
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		script.on_event("run_started", function(event)
+			game.record("demo_a")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+	assert_true(runtime.emit_event("run_started"))
+
+	assert_eq(lifecycle_calls, ["core", "demo_a"])
+
+
+func test_registering_again_replaces_handler() -> void:
+	_write_file("core", "control.lua", """
+		script.on_event("test_event", function(event)
+			game.record("first")
+		end)
+
+		script.on_event("test_event", function(event)
+			game.record("second")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+	assert_true(runtime.emit_event("test_event"))
+
+	assert_eq(lifecycle_calls, ["second"])
+
+
+func test_nil_unregisters_event_handler() -> void:
+	_write_file("core", "control.lua", """
+		script.on_event("test_event", function(event)
+			game.record("unexpected")
+		end)
+
+		script.on_event("test_event", nil)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+	assert_true(runtime.emit_event("test_event"))
+
+	assert_true(lifecycle_calls.is_empty())
+
+
+func test_handler_can_subscribe_to_multiple_events() -> void:
+	_write_file("core", "control.lua", """
+		script.on_event({"run_started", "run_finished"}, function(event)
+			game.record(event.name)
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+
+	assert_true(runtime.emit_event("run_started"))
+	assert_true(runtime.emit_event("run_finished"))
+
+	assert_eq(lifecycle_calls, ["run_started", "run_finished"])
+
+
+func test_on_load_can_register_event_handlers() -> void:
+	_write_file("core", "control.lua", """
+		script.on_load(function()
+			assert(game == nil)
+
+			script.on_event("loaded_event", function(event)
+				game.record("restored_handler")
+			end)
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate(
+		{"record": _record_lifecycle_call},
+		["core"]
+	))
+
+	assert_true(runtime.emit_event("loaded_event"))
+	assert_eq(lifecycle_calls, ["restored_handler"])
+
+
+func test_on_init_can_register_event_handlers() -> void:
+	_write_file("core", "control.lua", """
+		script.on_init(function()
+			script.on_event("initialized_event", function(event)
+				game.record("initialized_handler")
+			end)
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+	assert_true(runtime.emit_event("initialized_event"))
+
+	assert_eq(lifecycle_calls, ["initialized_handler"])
+
+
+func test_event_payload_is_isolated_between_mods() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		script.on_event("test_event", function(event)
+			event.nested.score = 999
+			game.record("core")
+		end)
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		script.on_event("test_event", function(event)
+			assert(event.nested.score == 7)
+			game.record("demo_a")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+
+	assert_true(runtime.emit_event("test_event", {
+		"nested": {"score": 7}
+	}))
+
+	assert_eq(lifecycle_calls, ["core", "demo_a"])
+
+
+func test_event_handler_failure_aborts_runtime() -> void:
+	_write_file("core", "control.lua", """
+		script.on_event("test_event", function(event)
+			error("intentional event failure")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate())
+
+	assert_false(runtime.emit_event("test_event"))
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
+	assert_null(runtime.get_state("core"))
+	assert_true(str(runtime.get_errors()).contains("intentional event failure"))
+
+
+func test_invalid_event_payload_is_rejected() -> void:
+	_write_file("core", "control.lua", """
+		script.on_event("test_event", function(event)
+			error("should never execute")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate())
+
+	assert_false(runtime.emit_event("test_event", {
+		"position": Vector3.ZERO
+	}))
+
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.ACTIVE)
+
+
+func test_invalid_event_registration_aborts_setup() -> void:
+	_write_file("core", "control.lua", """
+		script.on_event("test_event", 123)
+	""")
+
+	assert_false(runtime.prepare(_resolve_mods()))
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
+
+
+func test_event_handler_uses_execution_guard() -> void:
+	_write_file("core", "control.lua", """
+		script.on_event("test_event", function(event)
+			while true do end
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate())
+
+	assert_false(runtime.emit_event("test_event"))
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
+
+
+func test_event_is_delivered_after_activation() -> void:
+	_write_file("core", "control.lua", """
+		script.on_init(function()
+			storage.events_received = 0
+		end)
+
+		script.on_event("run_started", function(event)
+			assert(event.name == "run_started")
+			assert(event.difficulty == 3)
+
+			storage.events_received = storage.events_received + 1
+			game.record("event:" .. storage.events_received)
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+
+	assert_true(runtime.emit_event("run_started", {"difficulty": 3}))
+	assert_true(runtime.emit_event("run_started", {"difficulty": 3}))
+
+	assert_eq(lifecycle_calls, ["event:1", "event:2"])

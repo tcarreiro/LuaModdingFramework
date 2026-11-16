@@ -20,6 +20,7 @@ var _lifecycle_handlers: Dictionary = {}
 var _execution_guard := LuaExecutionGuard.new()
 var _storage: LuaTable
 var _storage_codec := RuntimeStorage.new()
+var _event_handlers: Dictionary = {}
 
 
 func _init(id: String) -> void:
@@ -50,7 +51,8 @@ func start(mod_versions: Dictionary = {}) -> bool:
 	_script_functions = {
 		"on_init": _lua_state.create_function(_lua_on_init),
 		"on_load": _lua_state.create_function(_lua_on_load),
-		"on_configuration_changed": _lua_state.create_function(_lua_on_configuration_changed)
+		"on_configuration_changed": _lua_state.create_function(_lua_on_configuration_changed),
+		"on_event": _lua_state.create_function(_lua_on_event),
 	}
 	
 	for function_name in _script_functions:
@@ -177,8 +179,6 @@ func run_lifecycle(handler_name: String, data: Dictionary = {}) -> bool:
 	return success and errors.is_empty()
 
 
-
-
 func get_phase() -> int:
 	return _phase
 
@@ -194,6 +194,7 @@ func get_errors() -> Array[String]:
 func close() -> void:
 	_lifecycle_handlers.clear()
 	_script_functions.clear()
+	_event_handlers.clear()
 	_script_api = null
 	_storage = null
 	_game_api = null
@@ -211,6 +212,57 @@ func _lua_on_load(handler: Variant) -> bool:
 
 func _lua_on_configuration_changed(handler: Variant) -> bool:
 	return _register_lifecycle_handler("on_configuration_changed", handler)
+
+
+func _lua_on_event(event_ids: Variant, handler: Variant) -> bool:
+	if _phase != Phase.SETUP and _phase != Phase.ACTIVE:
+		errors.append("Mod '%s' cannot register events in the current phase." % mod_id)
+		return false
+	
+	if handler != null and not handler is LuaFunction:
+		errors.append("Mod '%s' registered an invalid event handler." % mod_id)
+		return false
+	
+	if handler is LuaFunction and handler.get_lua_state() != _lua_state:
+		errors.append("Mod '%s' registered a handler from another LuaState." % mod_id)
+		return false
+	
+	var raw_ids: Array = []
+	if typeof(event_ids) == TYPE_STRING:
+		raw_ids.append(event_ids)
+	elif event_ids is LuaTable:
+		raw_ids = event_ids.to_array()
+	elif event_ids is Array:
+		raw_ids = event_ids
+	else:
+		errors.append("Mod '%s' provided invalid event identifiers." % mod_id)
+		return false
+
+	if raw_ids.is_empty():
+		errors.append("Mod '%s' provided an empty event list." % mod_id)
+		return false
+
+	var names: Array[String] = []
+
+	for value in raw_ids:
+		if typeof(value) != TYPE_STRING or String(value).strip_edges().is_empty():
+			errors.append("Mod '%s' provided an invalid event name." % mod_id)
+			return false
+
+		if value not in names:
+			names.append(value)
+
+	for event_name in names:
+		if handler == null:
+			_event_handlers.erase(event_name)
+		else:
+			_event_handlers[event_name] = handler
+
+	return true
+
+
+func has_event_handler(event_name: String) -> bool:
+	return _event_handlers.has(event_name)
 
 
 func _register_lifecycle_handler(handler_name: String, handler: Variant) -> bool:
@@ -269,7 +321,6 @@ func _validate_setup_api() -> bool:
 	return _validate_storage_api()
 
 
-
 func restore_storage(snapshot: Dictionary = {}) -> bool:
 	if _phase != Phase.ACTIVE or not errors.is_empty():
 		errors.append("Mod '%s' cannot restore storage outside activation." % mod_id)
@@ -311,3 +362,36 @@ func _validate_storage_api() -> bool:
 		errors.append("Mod '%s' replaced the storage table." % mod_id)
 		return false
 	return true
+
+
+func dispatch_event(event_name: String, data: Dictionary = {}) -> bool:
+	if _phase != Phase.ACTIVE or not errors.is_empty():
+		return false
+	
+	if not _event_handlers.has(event_name):
+		return true
+	
+	var event_data := data.duplicate(true)
+	event_data["name"] = event_name
+	var lua_data := LuaUtils.to_lua_value(_lua_state, event_data)
+	var callback: LuaFunction = _event_handlers[event_name]
+	var success := _execution_guard.invoke(
+		_lua_state,
+		callback,
+		[lua_data],
+		"%s/event:%s" % [mod_id, event_name]
+	)
+	
+	if not success:
+		errors.append("Lua error in mod '%s' (event '%s'): %s" % [
+			mod_id, event_name, _execution_guard.last_error
+		])
+	
+	var current_game: Variant = _lua_state.globals.rawget("game")
+	if not _same_lua_object(current_game, _game_api):
+		errors.append("Mod '%s' replaced the game API during event '%s'." % [mod_id, event_name])
+		_lua_state.globals.rawset("game", _game_api)
+	
+	_validate_script_api()
+	_validate_storage_api()
+	return success and errors.is_empty()

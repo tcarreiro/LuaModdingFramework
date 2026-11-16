@@ -14,58 +14,54 @@ var _phase: int = Phase.CREATED
 var _states: Dictionary[String, RuntimeState] = {}
 var _ordered_ids: Array[String] = []
 
-
 func prepare(mods: Array[ModManifest]) -> bool:
 	if _phase != Phase.CREATED:
 		errors.append("RuntimeManager can only prepare once.")
 		return false
-
+	
 	if mods.is_empty():
 		errors.append("Cannot prepare Runtime Stage without resolved mods.")
 		_fail()
 		return false
-
+	
 	var versions: Dictionary = {}
-
 	for manifest in mods:
 		if manifest == null or manifest.id.strip_edges().is_empty():
 			errors.append("Runtime Stage received an invalid mod manifest.")
 			_fail()
 			return false
-
+	
 		if versions.has(manifest.id):
 			errors.append("Runtime Stage received duplicate mod ID '%s'." % manifest.id)
 			_fail()
 			return false
-
 		versions[manifest.id] = manifest.version
-
+	
 	var loader := RuntimeLoader.new()
-
 	for manifest in mods:
 		if not loader.has_control(manifest):
 			continue
-
+	
 		var state := RuntimeState.new(manifest.id)
 		_states[manifest.id] = state
 		_ordered_ids.append(manifest.id)
-
+	
 		if not state.start(versions):
 			errors.append_array(state.get_errors())
 			_fail()
 			return false
-
+	
 		var source := loader.read_control(manifest)
 		if not loader.errors.is_empty():
 			errors.append_array(loader.errors)
 			_fail()
 			return false
-
+	
 		if not state.execute_control(source, loader.get_control_path(manifest)):
 			errors.append_array(state.get_errors())
 			_fail()
 			return false
-
+	
 	for mod_id in _ordered_ids:
 		var state: RuntimeState = _states[mod_id]
 		if not state.finish_setup():
@@ -73,10 +69,9 @@ func prepare(mods: Array[ModManifest]) -> bool:
 			errors.append("Failed to finish Runtime setup for mod '%s'." % mod_id)
 			_fail()
 			return false
-
+	
 	_phase = Phase.PREPARED
 	return true
-
 
 
 func activate(game_functions: Dictionary = {}, existing_mod_ids: Array[String] = [], configuration_changes: Variant = null, saved_storage: Dictionary = {}) -> bool:
@@ -159,6 +154,60 @@ func snapshot_storage() -> Dictionary:
 	return result
 
 
+func emit_event(event_name: String, data: Dictionary = {}) -> bool:
+	if _phase != Phase.ACTIVE:
+		errors.append("Runtime Stage must be active to emit events.")
+		return false
+	
+	if event_name.strip_edges().is_empty():
+		errors.append("Cannot emit an event without a name.")
+		return false
+	
+	if data.has("name"):
+		errors.append("Event payload cannot override the reserved 'name' field.")
+		return false
+	
+	var visited: Array[int] = [0]
+	if not _is_valid_event_value(data, 0, visited):
+		errors.append("Event '%s' contains unsupported data or exceeds its limits." % event_name)
+		return false
+	
+	for mod_id in _ordered_ids:
+		var state: RuntimeState = _states[mod_id]
+		if not state.dispatch_event(event_name, data):
+			errors.append_array(state.get_errors())
+			_fail()
+			return false
+	return true
+
+
+func _is_valid_event_value(value: Variant, depth: int, visited: Array[int]) -> bool:
+	if depth > 32:
+		return false
+	
+	visited[0] += 1
+	if visited[0] > 10_000:
+		return false
+	
+	match typeof(value):
+		TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_STRING:
+			return true
+		TYPE_FLOAT:
+			return is_finite(value)
+		TYPE_ARRAY:
+			for element in value:
+				if not _is_valid_event_value(element, depth + 1, visited):
+					return false
+			return true
+		TYPE_DICTIONARY:
+			for key in value:
+				if typeof(key) != TYPE_STRING and typeof(key) != TYPE_INT:
+					return false
+				if not _is_valid_event_value(value[key], depth + 1, visited):
+					return false
+			return true
+	return false
+
 
 func get_phase() -> int:
 	return _phase
@@ -172,7 +221,6 @@ func get_state(mod_id: String) -> RuntimeState:
 	# Do not allow callers to bypass the manager's activation barrier.
 	if _phase != Phase.ACTIVE:
 		return null
-
 	return _states.get(mod_id)
 
 
