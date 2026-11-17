@@ -6,8 +6,11 @@ extends MarginContainer
 @onready var reset_button: Button = %ResetButton
 @onready var confirm_button: Button = %ConfirmButton
 @onready var feedback: Label = %Feedback
+@onready var action_buttons: HBoxContainer = %Actions
 
 var _inputs: Dictionary[String, Control] = {}
+var _runtime_tick_button: Button
+var _runtime_reload_button: Button
 
 func _ready() -> void:
 	back_button.pressed.connect(_on_back_pressed)
@@ -15,6 +18,7 @@ func _ready() -> void:
 	confirm_button.pressed.connect(_on_confirm_pressed)
 
 	_build_settings()
+	_setup_runtime_buttons()
 
 
 func _build_settings() -> void:
@@ -183,6 +187,7 @@ func _on_reset_pressed() -> void:
 
 
 func _on_back_pressed() -> void:
+	GameMods.stop_runtime()
 	get_tree().change_scene_to_file("res://example/scenes/mod_selection.tscn")
 
 
@@ -217,12 +222,17 @@ func _on_confirm_pressed() -> void:
 	GameMods.selected_settings = selected_values
 	
 	if not GameMods.run_content_stage():
+		GameMods.stop_runtime()
 		feedback.text = "Erro ao carregar o Content Stage. Consulte o Output."
-
 		for error in GameMods.content_errors:
 			push_error("[ContentStage] %s" % error)
-
 		return
+	
+	if not GameMods.start_new_runtime():
+		_show_runtime_errors()
+		return
+	_runtime_tick_button.disabled = false
+	_runtime_reload_button.disabled = false
 
 	var catalog = GameMods.content_registry.get_catalog()
 	var template_count := 0
@@ -231,7 +241,7 @@ func _on_confirm_pressed() -> void:
 		var templates: Dictionary = catalog[type_id]
 		template_count += templates.size()
 
-	feedback.text = "Configurações confirmadas! %d Templates carregados." % template_count
+	_show_runtime_feedback("Configurações confirmadas! %d Templates carregados. Runtime ativo." % template_count)
 
 	print("\n[ContentStage] Finalized catalog:")
 
@@ -265,3 +275,55 @@ func _on_confirm_pressed() -> void:
 
 	print("\n[ContentStage] Polymorphic lookup:")
 	print(content_registry.get_template_in_family("loot", "training_gauntlet"))
+
+
+func _setup_runtime_buttons() -> void:
+	_runtime_tick_button = Button.new()
+	_runtime_tick_button.text = "Avançar tick"
+	_runtime_tick_button.disabled = true
+	_runtime_tick_button.pressed.connect(_on_runtime_tick_pressed)
+	action_buttons.add_child(_runtime_tick_button)
+
+	_runtime_reload_button = Button.new()
+	_runtime_reload_button.text = "Salvar e restaurar"
+	_runtime_reload_button.disabled = true
+	_runtime_reload_button.pressed.connect(_on_runtime_reload_pressed)
+	action_buttons.add_child(_runtime_reload_button)
+
+
+func _on_runtime_tick_pressed() -> void:
+	if not GameMods.advance_tick():
+		_show_runtime_errors()
+		return
+
+	_show_runtime_feedback("Evento on_tick emitido: %d" % GameMods.world_time)
+
+
+func _on_runtime_reload_pressed() -> void:
+	if not GameMods.save_and_restore_runtime():
+		_show_runtime_errors()
+		return
+
+	_show_runtime_feedback("Runtime restaurado. Continue avançando os ticks.")
+
+
+func _show_runtime_feedback(message: String) -> void:
+	feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	feedback.text = message
+
+	var log_size := GameMods.runtime_log.size()
+	var first := maxi(0, log_size - 6)
+
+	for i in range(first, log_size):
+		feedback.text += "\n" + GameMods.runtime_log[i]
+
+
+func _show_runtime_errors() -> void:
+	feedback.text = "Runtime Stage falhou:\n%s" % "\n".join(PackedStringArray(GameMods.runtime_errors))
+
+	for error in GameMods.runtime_errors:
+		push_error("[RuntimeStage] %s" % error)
+
+	var active := GameMods.is_runtime_active()
+	_runtime_tick_button.disabled = not active
+	_runtime_reload_button.disabled = not active
