@@ -34,6 +34,7 @@ func capture(lua_state: LuaState, storage: LuaTable) -> Dictionary:
 		"tables": _nodes.duplicate(true)
 	}
 
+
 # Rebuilds LuaTable from storage snapshot
 func restore(lua_state: LuaState, snapshot: Dictionary) -> LuaTable:
 	errors.clear()
@@ -121,6 +122,13 @@ func restore(lua_state: LuaState, snapshot: Dictionary) -> LuaTable:
 	
 			tables[i].rawset(key, value)
 	return tables[root_id]
+
+
+func release() -> void:
+	_table_ids.clear()
+	_nodes.clear()
+	_entry_count = 0
+	_lua_state = null
 
 
 func _capture_table(table: LuaTable, depth: int) -> int:

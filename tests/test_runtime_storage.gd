@@ -110,3 +110,25 @@ func test_rejects_invalid_snapshot() -> void:
 
 	assert_null(restored)
 	assert_false(codec.errors.is_empty())
+
+
+func test_release_clears_codec_references() -> void:
+	var storage := lua_state.create_table()
+	storage.rawset("value", 42)
+
+	var snapshot := codec.capture(lua_state, storage)
+
+	assert_true(codec.errors.is_empty())
+	assert_false(snapshot.is_empty())
+	assert_same(codec._lua_state, lua_state)
+
+	codec.release()
+
+	assert_null(codec._lua_state)
+	assert_true(codec._table_ids.is_empty())
+	assert_true(codec._nodes.is_empty())
+	assert_eq(codec._entry_count, 0)
+
+	var restored := codec.restore(lua_state, snapshot)
+	assert_not_null(restored)
+	assert_eq(restored.rawget("value"), 42)

@@ -345,8 +345,10 @@ func close() -> void:
 	_script_api = null
 	_remote_api = null
 	_storage = null
-	_game_api_entries.clear() # it needs to be BEDORE _game_api = null
+	_game_api_entries.clear() # it needs to be BEFORE _game_api = null
 	_game_api = null
+	
+	_storage_codec.release() # it needs to be BEFORE _lua_state = null
 	_lua_state = null
 	
 	_phase = Phase.CLOSED

@@ -100,3 +100,56 @@ func test_invoke_recovers_after_error() -> void:
 	assert_true(guard.invoke(lua_state, working))
 	assert_eq(guard.last_result, 123)
 	assert_eq(guard.last_error, "")
+
+
+func test_returned_table_survives_coroutine_completion() -> void:
+	assert_true(guard.execute(lua_state, """
+		return {
+			value = 42,
+			nested = {
+				enabled = true
+			}
+		}
+	"""))
+
+	assert_true(guard.last_result is LuaTable)
+	if not guard.last_result is LuaTable:
+		return
+
+	var returned: LuaTable = guard.last_result
+	var nested: LuaTable = returned.rawget("nested")
+
+	assert_eq(returned.rawget("value"), 42)
+	assert_eq(nested.rawget("enabled"), true)
+
+	assert_true(guard.execute(lua_state, "return 7"))
+	assert_eq(guard.last_result, 7)
+
+	assert_eq(returned.rawget("value"), 42)
+	assert_eq(nested.rawget("enabled"), true)
+
+	nested = null
+	returned = null
+
+
+func test_returned_function_survives_coroutine_completion() -> void:
+	assert_true(guard.execute(lua_state, """
+		return function()
+			return 42
+		end
+	"""))
+
+	assert_true(guard.last_result is LuaFunction)
+	if not guard.last_result is LuaFunction:
+		return
+
+	var returned: LuaFunction = guard.last_result
+
+	assert_eq(returned.invoke(), 42)
+
+	assert_true(guard.execute(lua_state, "return 100"))
+	assert_eq(guard.last_result, 100)
+
+	assert_eq(returned.invoke(), 42)
+
+	returned = null
