@@ -20,6 +20,8 @@ var _draining_events := false
 var _event_queue: Array[Dictionary] = []
 var _custom_event_owners: Dictionary = {}
 var _remote_interface_owners: Dictionary[String, String] = {}
+var _remote_call_stack: Array[String] = []
+var _lifecycle_ready: Dictionary[String, bool] = {}
 
 func prepare(mods: Array[ModManifest]) -> bool:
 	if _phase != Phase.CREATED:
@@ -54,6 +56,11 @@ func prepare(mods: Array[ModManifest]) -> bool:
 		_ordered_ids.append(manifest.id)
 	
 		if not state.set_custom_event_sink(Callable(self, "_enqueue_custom_event")):
+			errors.append_array(state.get_errors())
+			_fail()
+			return false
+	
+		if not state.set_remote_sinks(Callable(self, "_invoke_remote"), Callable(self, "_has_remote")):
 			errors.append_array(state.get_errors())
 			_fail()
 			return false
@@ -159,6 +166,7 @@ func activate(game_functions: Dictionary = {}, existing_mod_ids: Array[String] =
 			errors.append_array(state.get_errors())
 			_fail()
 			return false
+		_lifecycle_ready[mod_id] = true
 	
 	if configuration_changes != null:
 		for mod_id in _ordered_ids:
@@ -269,6 +277,8 @@ func _release_states() -> void:
 	_ordered_ids.clear()
 	_custom_event_owners.clear()
 	_remote_interface_owners.clear()
+	_remote_call_stack.clear()
+	_lifecycle_ready.clear()
 	_event_queue.clear()
 	_draining_events = false
 
@@ -372,3 +382,65 @@ func _flush_event_queue() -> bool:
 	
 	_draining_events = false
 	return true
+
+
+func _has_remote(interface_name: String, method_name: String) -> bool:
+	if method_name.is_empty():
+		return has_remote_interface(interface_name)
+	return has_remote_method(interface_name, method_name)
+
+
+
+func _invoke_remote(caller_id: String, interface_name: String, method_name: String, arguments: Array) -> Dictionary:
+	if _phase != Phase.PREPARED and _phase != Phase.ACTIVE:
+		return {
+			"ok": false,
+			"error": "Runtime Stage is not ready for remote calls."
+		}
+	
+	if not _states.has(caller_id):
+		return {
+			"ok": false,
+			"error": "Unknown remote caller '%s'." % caller_id
+		}
+	
+	if not has_remote_method(interface_name, method_name):
+		return {
+			"ok": false,
+			"error": "Unknown remote function '%s.%s'." % [interface_name, method_name]
+		}
+	
+	var owner_id := get_remote_interface_owner(interface_name)
+	var root_call := _remote_call_stack.is_empty()
+	if root_call:
+		_remote_call_stack.append(caller_id)
+	elif _remote_call_stack.back() != caller_id:
+		return {
+			"ok": false,
+			"error": "Invalid remote call chain."
+		}
+	
+	if owner_id in _remote_call_stack:
+		if root_call:
+			_remote_call_stack.pop_back()
+		return {
+			"ok": false,
+			"error": "Recursive remote call involving mod '%s'." % owner_id
+		}
+	
+	if not _lifecycle_ready.get(owner_id, false):
+		if root_call:
+			_remote_call_stack.pop_back()
+		return {
+			"ok": false,
+			"error": "Remote interface '%s' belongs to a mod that has not completed initialization." % interface_name
+		}
+	
+	_remote_call_stack.append(owner_id)
+	var target: RuntimeState = _states[owner_id]
+	var response := target.invoke_remote(interface_name, method_name, arguments)
+	
+	_remote_call_stack.pop_back()
+	if root_call:
+		_remote_call_stack.pop_back()
+	return response

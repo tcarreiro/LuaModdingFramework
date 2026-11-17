@@ -11,6 +11,17 @@ enum Phase {
 const MAX_CUSTOM_EVENTS := 1024
 const MAX_REMOTE_INTERFACES := 128
 const MAX_REMOTE_FUNCTIONS := 128
+const MAX_REMOTE_ARGUMENTS := 32
+const REMOTE_CALL_FACTORY := """
+return function(native_call)
+	assert(type(native_call) == "function", "Invalid native remote function")
+
+	return function(interface_name, method_name, ...)
+		return native_call(interface_name, method_name, table.pack(...))
+	end
+end
+"""
+
 
 var errors: Array[String] = []
 var mod_id: String
@@ -33,6 +44,9 @@ var _remote_api: LuaTable
 var _remote_functions: Dictionary = {}
 var _remote_interfaces: Dictionary = {}
 var _remote_coroutines: Dictionary = {}
+var _remote_native_call: LuaFunction
+var _remote_call_sink: Callable
+var _remote_has_sink: Callable
 
 
 func _init(id: String) -> void:
@@ -78,12 +92,44 @@ func start(mod_versions: Dictionary = {}) -> bool:
 	
 	_remote_api = _lua_state.create_table()
 	_remote_functions = {
-		"add_interface": _lua_state.create_function(_lua_remote_add_interface)
+		"add_interface": _lua_state.create_function(_lua_remote_add_interface),
+		"has_interface": _lua_state.create_function(_lua_remote_has_interface)
 	}
+
+	_remote_native_call = _lua_state.create_function(_lua_remote_call)
+
+	if _remote_native_call == null:
+		errors.append("Failed to create native remote function for mod '%s'." % mod_id)
+		return false
+
+	var factory_result: Variant = _lua_state.do_string(REMOTE_CALL_FACTORY)
+
+	if factory_result is LuaError:
+		errors.append("Failed to load remote call factory for mod '%s': %s" % [mod_id, factory_result])
+		return false
+
+	if not factory_result is LuaFunction:
+		errors.append("Remote call factory did not return a LuaFunction for mod '%s'." % mod_id)
+		return false
+
+	var factory: LuaFunction = factory_result
+	var call_result: Variant = factory.invokev([_remote_native_call])
+
+	if call_result is LuaError:
+		errors.append("Failed to create remote call wrapper for mod '%s': %s" % [mod_id, call_result])
+		return false
+
+	if not call_result is LuaFunction:
+		errors.append("Remote call wrapper is not a LuaFunction for mod '%s'." % mod_id)
+		return false
+
+	_remote_functions["call"] = call_result
+
 	for function_name in _remote_functions:
 		_remote_api.rawset(function_name, _remote_functions[function_name])
-	_lua_state.globals["remote"] = _remote_api
-	
+
+	_lua_state.globals.rawset("remote", _remote_api)
+
 	_lua_state.globals["mods"] = LuaUtils.to_lua_value(_lua_state, mod_versions)
 	_lua_state.globals["game"] = null
 	
@@ -231,11 +277,15 @@ func close() -> void:
 	
 	_script_functions.clear()
 	_remote_functions.clear()
+	_remote_native_call = null
 	
 	_custom_events.clear()
 	_custom_event_sink = Callable()
+	_remote_call_sink = Callable()
+	_remote_has_sink = Callable()
 	
 	_script_api = null
+	_remote_api = null
 	_storage = null
 	_game_api = null
 	_lua_state = null
@@ -444,6 +494,82 @@ func _lua_remote_add_interface(local_name: Variant, functions: Variant) -> Strin
 	_remote_coroutines[interface_name] = origin
 	
 	return interface_name
+
+
+
+func _lua_remote_has_interface(interface_name: Variant, method_name: Variant = null) -> bool:
+	if _phase != Phase.ACTIVE or _inside_on_load:
+		errors.append("Mod '%s' cannot query remote interfaces in this phase." % mod_id)
+		return false
+	
+	if typeof(interface_name) != TYPE_STRING:
+		errors.append("Remote interface name must be a string.")
+		return false
+	
+	if method_name != null and typeof(method_name) != TYPE_STRING:
+		errors.append("Remote method name must be a string.")
+		return false
+	
+	if not _remote_has_sink.is_valid():
+		errors.append("Remote registry is unavailable for mod '%s'." % mod_id)
+		return false
+	
+	return _remote_has_sink.call(
+		String(interface_name),
+		String(method_name) if method_name != null else ""
+	)
+
+
+func _lua_remote_call(interface_name: Variant, method_name: Variant, argument_table: Variant) -> Variant:
+	if _phase != Phase.ACTIVE or _inside_on_load:
+		errors.append("Mod '%s' cannot call remote interfaces in this phase." % mod_id)
+		return null
+	
+	if typeof(interface_name) != TYPE_STRING or typeof(method_name) != TYPE_STRING:
+		errors.append("Remote call requires string interface and method names.")
+		return null
+	
+	if not argument_table is LuaTable or argument_table.get_lua_state() != _lua_state:
+		errors.append("Invalid remote argument container for mod '%s'." % mod_id)
+		return null
+	
+	var count: Variant = LuaUtils.normalize_integer(argument_table.rawget("n"))
+	if typeof(count) != TYPE_INT or count < 0 or count > MAX_REMOTE_ARGUMENTS:
+		errors.append("Invalid remote argument count or limit exceeded.")
+		return null
+	
+	var arguments: Array = []
+	var visited: Dictionary = {}
+	var counter: Array[int] = [0]
+	
+	for i in range(1, int(count) + 1):
+		var value: Variant = argument_table.rawget(i)
+		var converted: Variant = _read_custom_event_value(value, 0, visited, counter)
+	
+		if not errors.is_empty():
+			return null
+	
+		arguments.append(converted)
+	if not _remote_call_sink.is_valid():
+		errors.append("Remote dispatcher is unavailable for mod '%s'." % mod_id)
+		return null
+	
+	var response: Variant = _remote_call_sink.call(
+		mod_id,
+		String(interface_name),
+		String(method_name),
+		arguments
+	)
+	
+	if not response is Dictionary:
+		errors.append("Remote dispatcher returned an invalid response.")
+		return null
+	
+	if not response.get("ok", false):
+		errors.append("Remote call failed: %s" % response.get("error", "Unknown error."))
+		return null
+	
+	return LuaUtils.to_lua_value(_lua_state, response.get("value"))
 #endregion
 
 
@@ -552,6 +678,73 @@ func has_remote_method(interface_name: String, method_name: String) -> bool:
 		return false
 	var methods: Dictionary = _remote_interfaces[interface_name]
 	return methods.has(method_name)
+
+
+func set_remote_sinks(call_sink: Callable, has_sink: Callable) -> bool:
+	if _phase != Phase.CREATED or not call_sink.is_valid() or not has_sink.is_valid():
+		errors.append("Invalid remote API sinks for mod '%s'." % mod_id)
+		return false
+	_remote_call_sink = call_sink
+	_remote_has_sink = has_sink
+	return true
+
+
+
+func invoke_remote(interface_name: String, method_name: String, arguments: Array) -> Dictionary:
+	if _phase != Phase.ACTIVE or not errors.is_empty():
+		return {
+			"ok": false,
+			"error": "Target mod '%s' is not ready." % mod_id
+		}
+	
+	if not has_remote_method(interface_name, method_name):
+		return {
+			"ok": false,
+			"error": "Unknown remote function '%s.%s'." % [interface_name, method_name]
+		}
+	
+	var methods: Dictionary = _remote_interfaces[interface_name]
+	var callback: LuaFunction = methods[method_name]
+	
+	# preserve original coroutine
+	var origin: LuaCoroutine = _remote_coroutines[interface_name]
+	var lua_arguments: Array = []
+	for argument in arguments:
+		lua_arguments.append(LuaUtils.to_lua_value(_lua_state, argument))
+	
+	var success := _execution_guard.invoke(
+		_lua_state,
+		callback,
+		lua_arguments,
+		"%s/remote:%s.%s" % [mod_id, interface_name, method_name],
+		Callable(self, "_serialize_remote_result")
+	)
+	
+	if not success:
+		errors.append("Lua remote error in mod '%s': %s" % [
+			mod_id, _execution_guard.last_error
+		])
+	
+	var current_game: Variant = _lua_state.globals.rawget("game")
+	if not _same_lua_object(current_game, _game_api):
+		errors.append("Mod '%s' replaced the game API during remote call." % mod_id)
+		_lua_state.globals.rawset("game", _game_api)
+	
+	_validate_script_api()
+	_validate_remote_api()
+	_validate_storage_api()
+	
+	var result: Variant = _execution_guard.last_result
+	var valid := success and errors.is_empty()
+	
+	callback = null
+	origin = null
+	
+	if not valid:
+		return {"ok": false, "error": str(errors)}
+	
+	return {"ok": true, "value": result}
+
 #endregion
 
 
@@ -714,4 +907,10 @@ func _validate_remote_api() -> bool:
 			return false
 	
 	return true
+
+
+func _serialize_remote_result(value: Variant) -> Variant:
+	var visited: Dictionary = {}
+	var counter: Array[int] = [0]
+	return _read_custom_event_value(value, 0, visited, counter)
 #endregion

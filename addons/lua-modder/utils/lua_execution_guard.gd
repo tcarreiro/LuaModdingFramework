@@ -55,7 +55,7 @@ func execute(lua_state: LuaState, source: String, chunk_name: String = "") -> bo
 	return _run_protected(lua_state, loaded, [], chunk_name)
 
 
-func invoke(lua_state: LuaState, callback: LuaFunction, arguments: Array = [], callback_name: String = "") -> bool:
+func invoke(lua_state: LuaState, callback: LuaFunction, arguments: Array = [], callback_name: String = "", result_converter: Callable = Callable()) -> bool:
 	last_error = ""
 	last_result = null
 
@@ -72,10 +72,10 @@ func invoke(lua_state: LuaState, callback: LuaFunction, arguments: Array = [], c
 		if argument is LuaObject and argument.get_lua_state() != lua_state:
 			return _fail("Lua argument belongs to a different LuaState.")
 
-	return _run_protected(lua_state, callback, arguments, callback_name)
+	return _run_protected(lua_state, callback, arguments, callback_name, result_converter)
 
 
-func _run_protected(lua_state: LuaState, callback: LuaFunction, arguments: Array, context: String) -> bool:
+func _run_protected(lua_state: LuaState, callback: LuaFunction, arguments: Array, context: String, result_converter: Callable = Callable()) -> bool:
 	_running = true
 	_active_state = lua_state
 	_started_at_ms = Time.get_ticks_msec()
@@ -96,9 +96,7 @@ func _run_protected(lua_state: LuaState, callback: LuaFunction, arguments: Array
 				maxi(1, hook_interval))
 
 			var result: Variant = coroutine.resumev(arguments)
-
 			coroutine.set_hook(null, 0)
-
 			if not _abort_reason.is_empty():
 				last_error = _abort_reason
 			elif result is LuaError:
@@ -108,7 +106,10 @@ func _run_protected(lua_state: LuaState, callback: LuaFunction, arguments: Array
 			elif coroutine.status != LuaThread.STATUS_DEAD:
 				last_error = "Lua coroutine terminated with status %d." % coroutine.status
 			else:
-				last_result = result
+				if result_converter.is_valid():
+					last_result = result_converter.call(result)
+				else:
+					last_result = result
 				success = true
 
 	_active_coroutine = null

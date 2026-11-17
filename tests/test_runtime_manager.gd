@@ -1007,3 +1007,208 @@ func test_invalid_remote_registration_aborts_manager_preparation() -> void:
 	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
 	assert_true(runtime.get_remote_interfaces().is_empty())
 	assert_false(runtime.get_errors().is_empty())
+
+
+func test_remote_call_with_positional_arguments() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		remote.add_interface("math", {
+			add = function(a, b)
+				return a + b
+			end
+		})
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		script.on_init(function()
+			assert(remote.has_interface("core:math"))
+			assert(remote.has_interface("core:math", "add"))
+			assert(not remote.has_interface("core:math", "missing"))
+
+			local result = remote.call("core:math", "add", 10, 20)
+			assert(result == 30)
+
+			game.record("sum:" .. result)
+		end)
+	""")
+	var prepared := runtime.prepare(_resolve_mods(["demo_a"]))
+	assert_true(prepared, str(runtime.get_errors()))
+	if not prepared:
+		return
+	var activated := runtime.activate({"record": _record_lifecycle_call})
+	assert_true(activated, str(runtime.get_errors()))
+	if not activated:
+		return
+	assert_eq(lifecycle_calls, ["sum:30"])
+
+
+func test_remote_call_preserves_nil_arguments() -> void:
+	_create_mod("demo_a")
+	
+	_write_file("core", "control.lua", """
+		remote.add_interface("utils", {
+			check = function(a, b, c)
+				assert(a == 10)
+				assert(b == nil)
+				assert(c == 30)
+				return true
+			end
+		})
+	""")
+	
+	_write_file("demo_a", "control.lua", """
+		script.on_init(function()
+			assert(remote.call("core:utils", "check", 10, nil, 30))
+			game.record("nil_ok")
+		end)
+	""")
+	
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+	assert_eq(lifecycle_calls, ["nil_ok"])
+
+
+func test_remote_call_copies_nested_tables() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		remote.add_interface("data", {
+			modify = function(payload)
+				assert(payload.details.score == 7)
+				payload.details.score = 100
+
+				return {
+					details = payload.details,
+					valid = true
+				}
+			end
+		})
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		script.on_init(function()
+			local original = {
+				details = {
+					score = 7
+				}
+			}
+
+			local result = remote.call("core:data", "modify", original)
+
+			assert(result.details.score == 100)
+			assert(result.valid == true)
+			assert(original.details.score == 7)
+
+			game.record("isolated")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+	assert_eq(lifecycle_calls, ["isolated"])
+
+
+func test_remote_call_can_execute_repeatedly() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		remote.add_interface("counter", {
+			increment = function()
+				storage.value = (storage.value or 0) + 1
+				return storage.value
+			end
+		})
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		script.on_init(function()
+			for i = 1, 50 do
+				local result = remote.call("core:counter", "increment")
+				assert(result == i)
+			end
+
+			game.record("50_calls")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+	assert_true(runtime.activate({"record": _record_lifecycle_call}))
+	assert_eq(lifecycle_calls, ["50_calls"])
+
+
+func test_recursive_remote_calls_are_rejected() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		remote.add_interface("cycle", {
+			call_back = function()
+				return remote.call("demo_a:cycle", "again")
+			end
+		})
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		remote.add_interface("cycle", {
+			again = function()
+				return 1
+			end
+		})
+
+		script.on_init(function()
+			remote.call("core:cycle", "call_back")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+	assert_false(runtime.activate())
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
+	assert_true(str(runtime.get_errors()).contains("Recursive remote call"))
+
+
+func test_remote_call_rejects_uninitialized_target() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		script.on_init(function()
+			remote.call("demo_a:example", "execute")
+		end)
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		remote.add_interface("example", {
+			execute = function()
+				return true
+			end
+		})
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+	assert_false(runtime.activate())
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
+	assert_true(str(runtime.get_errors()).contains("not completed initialization"))
+
+
+func test_remote_call_rejects_function_return() -> void:
+	_create_mod("demo_a")
+
+	_write_file("core", "control.lua", """
+		remote.add_interface("invalid", {
+			get = function()
+				return function()
+					return true
+				end
+			end
+		})
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		script.on_init(function()
+			remote.call("core:invalid", "get")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+	assert_false(runtime.activate())
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
+	assert_false(runtime.get_errors().is_empty())
