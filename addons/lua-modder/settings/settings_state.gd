@@ -38,7 +38,6 @@ var _registry: ModSettingsRegistry
 var _current_mod_id: String = ""
 var _settings_api: LuaTable
 var _settings_functions: Dictionary = {}
-var _lua_rawequal: LuaFunction
 var _execution_guard := LuaExecutionGuard.new()
 
 func start() -> void:
@@ -60,11 +59,10 @@ func start() -> void:
 		"update": _lua_state.create_function(_lua_update),
 		"force": _lua_state.create_function(_lua_force)
 	}
-
+	
 	for method_name in _settings_functions:
 		_settings_api[method_name] = _settings_functions[method_name]
-
-	_lua_rawequal = _lua_state.globals["rawequal"]
+	
 	_lua_state.globals["Settings"] = _settings_api
 
 
@@ -136,7 +134,6 @@ func close() -> void:
 
 	_settings_api = null
 	_settings_functions.clear()
-	_lua_rawequal = null
 	_lua_state = null
 	_current_mod_id = ""
 
@@ -282,23 +279,24 @@ func _lua_force(id: Variant, value: Variant) -> bool:
 	return _registry.force(id, value, _current_mod_id)
 
 
+
 func _validate_settings_api(mod_id: String) -> bool:
 	var current_api: Variant = _lua_state.globals.rawget("Settings")
-
+	
 	if not current_api is LuaTable:
 		errors.append("Mod '%s' removed or replaced the Settings API." % mod_id)
 		return false
-
-	if _lua_rawequal.invoke(current_api, _settings_api) != true:
+	
+	if not LuaUtils.same_lua_object(_lua_state, current_api, _settings_api):
 		errors.append("Mod '%s' replaced the Settings API table." % mod_id)
 		return false
-
+	
 	for method_name in _settings_functions:
 		var current_function: Variant = _settings_api.rawget(method_name)
 		var expected_function: Variant = _settings_functions[method_name]
-
-		if _lua_rawequal.invoke(current_function, expected_function) != true:
+	
+		if not LuaUtils.same_lua_object(_lua_state, current_function, expected_function):
 			errors.append("Mod '%s' replaced Settings.%s." % [mod_id, method_name])
 			return false
-
+	
 	return true

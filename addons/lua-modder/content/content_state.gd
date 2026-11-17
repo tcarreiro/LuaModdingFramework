@@ -10,7 +10,6 @@ var _raw: LuaTable
 var _current_mod_id: String = ""
 var _content_api: LuaTable
 var _extend_function: LuaFunction
-var _lua_rawequal: LuaFunction
 var _execution_guard := LuaExecutionGuard.new()
 
 func _init(content_types: ContentTypeRegistry) -> void:
@@ -32,7 +31,6 @@ func start(startup_settings: Dictionary = {}, mod_versions: Dictionary = {}) -> 
 	_content_api = _lua_state.create_table()
 	_raw = _lua_state.create_table()
 	_extend_function = _lua_state.create_function(_lua_extend)
-	_lua_rawequal = _lua_state.globals["rawequal"]
 
 	_content_api["raw"] = _raw
 	_content_api["extend"] = _extend_function
@@ -120,31 +118,28 @@ func finish() -> ContentRegistry:
 	return result
 
 
-
 func _validate_content_api(mod_id: String) -> bool:
 	var current_content: Variant = _lua_state.globals.rawget("Content")
-
 	if not current_content is LuaTable:
 		errors.append("Mod '%s' removed or replaced the Content API." % mod_id)
 		return false
-
-	if _lua_rawequal.invoke(current_content, _content_api) != true:
+	
+	if not LuaUtils.same_lua_object(_lua_state, current_content, _content_api):
 		errors.append("Mod '%s' replaced the Content API table." % mod_id)
 		return false
-
+	
 	var current_raw: Variant = current_content.rawget("raw")
-
-	if _lua_rawequal.invoke(current_raw, _raw) != true:
+	if not LuaUtils.same_lua_object(_lua_state, current_raw, _raw):
 		errors.append("Mod '%s' replaced Content.raw." % mod_id)
 		return false
-
+	
 	var current_extend: Variant = current_content.rawget("extend")
-
-	if _lua_rawequal.invoke(current_extend, _extend_function) != true:
+	if not LuaUtils.same_lua_object(_lua_state, current_extend, _extend_function):
 		errors.append("Mod '%s' replaced Content.extend." % mod_id)
 		return false
-
+	
 	return true
+
 
 
 func _synchronize_raw(mod_id: String) -> bool:
@@ -432,7 +427,6 @@ func close() -> void:
 
 	_content_api = null
 	_extend_function = null
-	_lua_rawequal = null
 	_raw = null
 	_lua_state = null
 	_current_mod_id = ""
