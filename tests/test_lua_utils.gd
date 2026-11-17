@@ -38,3 +38,23 @@ func test_normalize_integer_fields() -> void:
 		assert_eq(typeof(value), TYPE_INT)
 
 	assert_eq(data["allowed_values"], [10, 25, 50])
+
+
+func test_same_lua_object_checks_identity_type_and_owner_state() -> void:
+	var first := LuaState.new()
+	var second := LuaState.new()
+
+	var original := first.create_table()
+	first.globals.rawset("reference", original)
+
+	var alias: LuaTable = first.globals.rawget("reference")
+	var different := first.create_table()
+	var foreign := second.create_table()
+	var function := first.create_function(func(): return true)
+
+	assert_true(LuaUtils.same_lua_object(first, original, alias))
+	assert_false(LuaUtils.same_lua_object(first, original, different))
+	assert_false(LuaUtils.same_lua_object(first, original, foreign))
+	assert_false(LuaUtils.same_lua_object(first, original, function))
+	assert_false(LuaUtils.same_lua_object(second, original, alias))
+	assert_false(LuaUtils.same_lua_object(null, original, alias))

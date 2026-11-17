@@ -24,8 +24,8 @@ func test_normal_execution() -> void:
 
 
 func test_instruction_limit() -> void:
-	guard.instruction_limit = 2000
-	guard.time_limit_ms = 10000
+	guard.max_instructions = 2000
+	guard.max_duration_ms = 10000
 
 	assert_false(guard.execute(lua, """
 		local total = 0
@@ -39,13 +39,13 @@ func test_instruction_limit() -> void:
 
 
 func test_source_size_limit() -> void:
-	guard.source_limit_bytes = 10
+	guard.max_source_bytes = 10
 
 	assert_false(guard.execute(lua, """
 		result = 123456789
 	"""))
 
-	assert_true(guard.last_error.contains("maximum size"))
+	assert_true(guard.last_error.contains("maximum allowed size"))
 
 
 func test_syntax_error() -> void:

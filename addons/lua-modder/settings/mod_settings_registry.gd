@@ -77,7 +77,7 @@ func update(id: String, changes: Dictionary, mod_id: String) -> bool:
 				return false
 		
 		if field in [ModSetting.DISPLAY_NAME, ModSetting.DESCRIPTION, ModSetting.ORDER, ModSetting.VALUE_TYPE, ModSetting.SCOPE]:
-			if typeof(field) != TYPE_STRING:
+			if typeof(value) != TYPE_STRING:
 				errors.append("Property '%s' must be a string." % field)
 				return false
 		

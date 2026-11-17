@@ -222,4 +222,35 @@ func test_lua_utils_array_conversion() -> void:
 	""")
 
 	assert_eq(result, true)
-	
+
+
+
+func test_independent_settings_states_validate_apis() -> void:
+	var second := SettingsState.new()
+	second.start()
+
+	var states_distinct := settings_state._lua_state != second._lua_state
+	var first_bound = settings_state._settings_api.get_lua_state() == settings_state._lua_state \
+		and settings_state._settings_functions["define"].get_lua_state() == settings_state._lua_state
+	var second_bound = second._settings_api.get_lua_state() == second._lua_state \
+		and second._settings_functions["define"].get_lua_state() == second._lua_state
+
+	assert_true(states_distinct, "SettingsStates must have independent LuaStates.")
+	assert_true(first_bound, "First SettingsState has foreign API wrappers.")
+	assert_true(second_bound, "Second SettingsState has foreign API wrappers.")
+
+	if states_distinct and first_bound and second_bound:
+		assert_true(settings_state.execute("""
+			assert(type(Settings.define) == "function")
+		""", "mod_a"), str(settings_state.get_errors()))
+
+		assert_true(second.execute("""
+			assert(type(Settings.define) == "function")
+		""", "mod_b"), str(second.get_errors()))
+
+	second.close()
+
+	if first_bound:
+		assert_true(settings_state.execute("""
+			assert(type(Settings.get) == "function")
+		""", "mod_a"), str(settings_state.get_errors()))

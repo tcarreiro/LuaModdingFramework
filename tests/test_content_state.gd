@@ -443,3 +443,39 @@ func test_content_api_integrity_ignores_overridden_rawequal() -> void:
 	""", "demo_a"))
 
 	assert_true(state.get_errors()[0].contains("Content.raw"))
+
+
+func test_independent_content_states_validate_apis() -> void:
+	var second := ContentState.new(types)
+	second.start()
+
+	var states_distinct := state._lua_state != second._lua_state
+	var first_bound := state._content_api.get_lua_state() == state._lua_state \
+		and state._raw.get_lua_state() == state._lua_state \
+		and state._extend_function.get_lua_state() == state._lua_state
+	var second_bound := second._content_api.get_lua_state() == second._lua_state \
+		and second._raw.get_lua_state() == second._lua_state \
+		and second._extend_function.get_lua_state() == second._lua_state
+
+	assert_true(states_distinct, "ContentStates must have independent LuaStates.")
+	assert_true(first_bound, "First ContentState has foreign API wrappers.")
+	assert_true(second_bound, "Second ContentState has foreign API wrappers.")
+
+	if states_distinct and first_bound and second_bound:
+		assert_true(state.execute("""
+			assert(type(Content.extend) == "function")
+			assert(type(Content.raw) == "table")
+		""", "core"), str(state.get_errors()))
+
+		assert_true(second.execute("""
+			assert(type(Content.extend) == "function")
+			assert(type(Content.raw) == "table")
+		""", "demo_a"), str(second.get_errors()))
+
+	second.close()
+
+	if first_bound:
+		assert_true(state.execute("""
+			assert(type(Content.extend) == "function")
+			assert(type(Content.raw) == "table")
+		""", "core"), str(state.get_errors()))

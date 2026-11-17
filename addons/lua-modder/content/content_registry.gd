@@ -174,15 +174,13 @@ func get_catalog() -> Dictionary:
 	return _catalog.duplicate(true)
 
 
-# Visao polimorfica: inclui o tipo informado e todos os seus subtipos.
-# A consulta nao altera os buckets reais do catalogo (Content.raw).
 func get_templates_in_family(type_id: String) -> Dictionary:
 	var result: Dictionary = {}
 	for derived_type in _types.get_derived_types(type_id):
 		var bucket: Dictionary = _catalog.get(derived_type, {})
 		for template_id in bucket:
 			if result.has(template_id):
-				return {} # IDs ambiguos; finalize() rejeita essa situacao.
+				return {}
 			result[template_id] = bucket[template_id].duplicate(true)
 	return result
 
@@ -194,7 +192,7 @@ func get_template_in_family(type_id: String, template_id: String) -> Dictionary:
 		if not has_template(derived_type, template_id):
 			continue
 		if found:
-			return {} # Identidade ambigua antes da finalizacao.
+			return {}
 		result = get_template(derived_type, template_id)
 		found = true
 	return result
@@ -408,8 +406,6 @@ func _validate_object_references(owner_type: String, data: Dictionary, path: Str
 			_validate_object_references(struct_id, value, property_path, catalog)
 
 
-# Nomes de Templates sao unicos dentro de cada familia de heranca.
-# Familias independentes podem reutilizar o mesmo ID.
 func _validate_family_id_uniqueness(catalog: Dictionary) -> void:
 	var seen: Dictionary = {}
 	for type_id in catalog:

@@ -51,7 +51,6 @@ func _register(type_id: String, script: Script, validator: Callable, kind: Strin
 	return true
 
 
-# Examina toda a cadeia GDScript: classes intermediarias nao precisam estar registradas.
 func _get_script_properties(script: Script) -> Dictionary:
 	var hierarchy: Array[Script] = []
 	var current: Script = script
@@ -74,7 +73,6 @@ func _get_script_properties(script: Script) -> Dictionary:
 	return properties
 
 
-# Identifica o ancestral GDScript registrado mais proximo, sem depender de class_name.
 func _get_inferred_parent_candidates(type_id: String) -> Array[String]:
 	var candidates: Array[String] = []
 	if not has_type(type_id):
@@ -106,7 +104,6 @@ func get_parent_type(type_id: String) -> String:
 	return candidates[0] if candidates.size() == 1 else ""
 
 
-# Retorna a cadeia na ordem base -> especializacao, incluindo o proprio tipo.
 func get_type_lineage(type_id: String) -> Array[String]:
 	var lineage: Array[String] = []
 	if not has_type(type_id):
@@ -440,7 +437,6 @@ func validate_custom(type_id: String, data: Dictionary) -> String:
 	if not _registered.has(type_id):
 		return "Unknown content type '%s'." % type_id
 
-	# Primeiro os validadores dos ancestrais, depois os da especializacao.
 	var lineage: Array[String] = get_type_lineage(type_id)
 	if not has_type(type_id):
 		lineage.append(type_id)
