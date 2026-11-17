@@ -1,14 +1,10 @@
-
-class_name ContentRegistry extends RefCounted
-
-var errors: Array[String] = []
+class_name ContentRegistry extends Registry
 
 var _types: ContentTypeRegistry
 var _validator: ContentValidator
 var _catalog: Dictionary = {}
 var _metadata: Dictionary = {}
 var _finalized := false
-
 
 func _init(content_types: ContentTypeRegistry) -> void:
 	_types = content_types
@@ -22,52 +18,19 @@ func register_template(data: Dictionary, mod_id: String) -> bool:
 func extend(templates: Array, mod_id: String) -> bool:
 	if not _can_modify(mod_id):
 		return false
-
 	var initial_error_count := errors.size()
 	var pending: Dictionary = {}
-
 	for value in templates:
-		if typeof(value) != TYPE_DICTIONARY:
-			errors.append("Template must be a Dictionary.")
-			continue
-
-		var data: Dictionary = value
-		var identity := _read_identity(data)
-
-		if identity.is_empty():
-			continue
-
-		var type_id: String = identity["type"]
-		var template_id: String = identity["id"]
-
-		if has_template(type_id, template_id):
-			errors.append("Template '%s.%s' is already registered." % [type_id, template_id])
-			continue
-
-		if not pending.has(type_id):
-			pending[type_id] = {}
-
-		var pending_type: Dictionary = pending[type_id]
-
-		if pending_type.has(template_id):
-			errors.append("Duplicate Template '%s.%s' in the same batch." % [type_id, template_id])
-			continue
-
-		pending_type[template_id] = true
-
+		_validate_pending_template(value, pending)
 	if errors.size() != initial_error_count:
 		return false
-
 	for value in templates:
 		var data: Dictionary = value.duplicate(true)
-		var type_id: String = String(data["type"])
-		var template_id: String = String(data["id"])
-
+		var type_id := String(data["type"])
+		var template_id := String(data["id"])
 		data["type"] = type_id
 		data["id"] = template_id
-
 		_insert_template(type_id, template_id, data, mod_id)
-
 	return true
 
 
@@ -218,49 +181,16 @@ func is_finalized() -> bool:
 func finalize() -> bool:
 	if _finalized:
 		return true
+	if not errors.is_empty() or not _validate_type_registry():
+		return false
 
+	var normalized_catalog := _normalize_catalog()
 	if not errors.is_empty():
 		return false
-
-	if not _validate_type_registry():
-		return false
-
-	var normalized_catalog: Dictionary = {}
-	var type_ids: Array = _catalog.keys()
-	type_ids.sort()
-
-	for type_id in type_ids:
-		var bucket: Dictionary = _catalog[type_id]
-		var normalized_bucket: Dictionary = {}
-		var template_ids: Array = bucket.keys()
-		template_ids.sort()
-
-		for template_id in template_ids:
-			var data: Dictionary = bucket[template_id]
-
-			if _validator.validate(type_id, data):
-				normalized_bucket[template_id] = _validator.get_normalized_data()
-			else:
-				errors.append_array(_validator.errors)
-
-		normalized_catalog[type_id] = normalized_bucket
-
-	if not errors.is_empty():
-		return false
-
 	_validate_family_id_uniqueness(normalized_catalog)
 	if not errors.is_empty():
 		return false
-
-	for type_id in type_ids:
-		var bucket: Dictionary = normalized_catalog[type_id]
-
-		for template_id in bucket:
-			var data: Dictionary = bucket[template_id]
-			var path := "%s[%s]" % [type_id, template_id]
-
-			_validate_object_references(type_id, data, path, normalized_catalog)
-
+	_validate_all_references(normalized_catalog)
 	if not errors.is_empty():
 		return false
 
@@ -269,11 +199,63 @@ func finalize() -> bool:
 	return true
 
 
+func _normalize_catalog() -> Dictionary:
+	var normalized: Dictionary = {}
+	var type_ids: Array = _catalog.keys()
+	type_ids.sort()
+	for type_id in type_ids:
+		var bucket: Dictionary = _catalog[type_id]
+		var normalized_bucket: Dictionary = {}
+		var template_ids: Array = bucket.keys()
+		template_ids.sort()
+		for template_id in template_ids:
+			var data: Dictionary = bucket[template_id]
+			if _validator.validate(type_id, data):
+				normalized_bucket[template_id] = _validator.get_normalized_data()
+			else:
+				errors.append_array(_validator.errors)
+		normalized[type_id] = normalized_bucket
+	return normalized
+
+
+func _validate_all_references(catalog: Dictionary) -> void:
+	var type_ids: Array = catalog.keys()
+	type_ids.sort()
+	for type_id in type_ids:
+		var bucket: Dictionary = catalog[type_id]
+		for template_id in bucket:
+			var data: Dictionary = bucket[template_id]
+			var path := "%s[%s]" % [type_id, template_id]
+			_validate_object_references(type_id, data, path, catalog)
+
+
 func clear() -> void:
 	_catalog.clear()
 	_metadata.clear()
 	errors.clear()
 	_finalized = false
+
+
+func _validate_pending_template(value: Variant, pending: Dictionary) -> void:
+	if typeof(value) != TYPE_DICTIONARY:
+		errors.append("Template must be a Dictionary.")
+		return
+	var data: Dictionary = value
+	var identity := _read_identity(data)
+	if identity.is_empty():
+		return
+	var type_id: String = identity["type"]
+	var template_id: String = identity["id"]
+	if has_template(type_id, template_id):
+		errors.append("Template '%s.%s' is already registered." % [type_id, template_id])
+		return
+	if not pending.has(type_id):
+		pending[type_id] = {}
+	var bucket: Dictionary = pending[type_id]
+	if bucket.has(template_id):
+		errors.append("Duplicate Template '%s.%s' in the same batch." % [type_id, template_id])
+		return
+	bucket[template_id] = true
 
 
 func _read_identity(data: Dictionary) -> Dictionary:

@@ -1,10 +1,10 @@
 extends GutTest
 
-var registry: ModSettingsRegistry
+var registry: SettingsRegistry
 
 
 func before_each() -> void:
-	registry = ModSettingsRegistry.new()
+	registry = SettingsRegistry.new()
 
 
 func _create_setting(id: String = "enemy_speed") -> ModSetting:

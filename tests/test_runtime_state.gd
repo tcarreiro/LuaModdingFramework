@@ -24,15 +24,15 @@ func test_initial_phase_is_setup() -> void:
 
 
 func test_control_has_no_game_access() -> void:
-	assert_true(state.execute_control("""
+	assert_true(state.execute("""
 		assert(game == nil)
 		assert(script ~= nil)
 		assert(mods["core"] == "0.1.0")
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 
 func test_register_lifecycle_handlers() -> void:
-	assert_true(state.execute_control("""
+	assert_true(state.execute("""
 		script.on_init(function()
 			assert(game ~= nil)
 		end)
@@ -42,7 +42,7 @@ func test_register_lifecycle_handlers() -> void:
 
 		script.on_configuration_changed(function(event)
 		end)
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_true(state.has_lifecycle_handler("on_init"))
 	assert_true(state.has_lifecycle_handler("on_load"))
@@ -50,18 +50,18 @@ func test_register_lifecycle_handlers() -> void:
 
 
 func test_lifecycle_handler_can_be_unregistered() -> void:
-	assert_true(state.execute_control("""
+	assert_true(state.execute("""
 		script.on_init(function() end)
 		script.on_init(nil)
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_false(state.has_lifecycle_handler("on_init"))
 
 
 func test_invalid_lifecycle_handler_is_rejected() -> void:
-	assert_false(state.execute_control("""
+	assert_false(state.execute("""
 		script.on_init(123)
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_false(state.get_errors().is_empty())
 	assert_false(state.finish_setup())
@@ -75,23 +75,23 @@ func test_lua_states_are_isolated() -> void:
 		"demo_a": "0.1.0"
 	}))
 
-	assert_true(state.execute_control("""
+	assert_true(state.execute("""
 		shared_value = 99
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
-	var success := second.execute_control("""
+	var success := second.execute("""
 		assert(shared_value == nil)
 		shared_value = 10
-	""", "demo_a/control.lua")
+	""", "", "demo_a/control.lua")
 
 	if not success:
 		print("RuntimeState demo_a errors: ", second.get_errors())
 
 	assert_true(success)
 
-	assert_true(state.execute_control("""
+	assert_true(state.execute("""
 		assert(shared_value == 99)
-	""", "core/check.lua"))
+	""", "", "core/check.lua"))
 
 	second.close()
 
@@ -102,9 +102,9 @@ func test_cannot_activate_before_setup_finishes() -> void:
 
 
 func test_setup_then_activation() -> void:
-	assert_true(state.execute_control("""
+	assert_true(state.execute("""
 		assert(game == nil)
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_true(state.finish_setup())
 	assert_eq(state.get_phase(), RuntimeState.Phase.PREPARED)
@@ -116,39 +116,39 @@ func test_setup_then_activation() -> void:
 	assert_eq(state.get_phase(), RuntimeState.Phase.ACTIVE)
 
 
-func test_cannot_execute_control_after_setup() -> void:
+func test_cannot_execute_after_setup() -> void:
 	assert_true(state.finish_setup())
 
-	assert_false(state.execute_control("""
+	assert_false(state.execute("""
 		late_registration = true
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 
 func test_cannot_replace_script_api() -> void:
-	assert_false(state.execute_control("""
+	assert_false(state.execute("""
 		script.on_init = function() end
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_false(state.finish_setup())
 
 
 func test_cannot_define_game_during_setup() -> void:
-	assert_false(state.execute_control("""
+	assert_false(state.execute("""
 		game = {}
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_true(state.get_errors()[0].contains("game"))
 
 
 func test_restricted_libraries() -> void:
-	assert_true(state.execute_control("""
+	assert_true(state.execute("""
 		assert(io == nil)
 		assert(os == nil)
 		assert(package == nil)
 		assert(debug == nil)
 		assert(dofile == nil)
 		assert(loadfile == nil)
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 
 func test_close_releases_state() -> void:
@@ -159,7 +159,7 @@ func test_close_releases_state() -> void:
 
 
 func test_registers_remote_interface() -> void:
-	assert_true(state.execute_control("""
+	assert_true(state.execute("""
 		local name = remote.add_interface("inventory", {
 			get_quantity = function(item_id)
 				return 10
@@ -171,7 +171,7 @@ func test_registers_remote_interface() -> void:
 		})
 
 		assert(name == "core:inventory")
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_eq(state.get_remote_interfaces(), ["core:inventory"])
 	assert_true(state.has_remote_method("core:inventory", "get_quantity"))
@@ -180,18 +180,18 @@ func test_registers_remote_interface() -> void:
 
 
 func test_rejects_invalid_remote_method() -> void:
-	assert_false(state.execute_control("""
+	assert_false(state.execute("""
 		remote.add_interface("inventory", {
 			get_quantity = 123
 		})
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_true(state.get_remote_interfaces().is_empty())
 	assert_false(state.get_errors().is_empty())
 
 
 func test_rejects_duplicate_remote_interface() -> void:
-	assert_false(state.execute_control("""
+	assert_false(state.execute("""
 		remote.add_interface("inventory", {
 			first = function() end
 		})
@@ -199,16 +199,16 @@ func test_rejects_duplicate_remote_interface() -> void:
 		remote.add_interface("inventory", {
 			second = function() end
 		})
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_eq(state.get_remote_interfaces(), ["core:inventory"])
 	assert_false(state.has_remote_method("core:inventory", "second"))
 
 
 func test_cannot_replace_remote_api() -> void:
-	assert_false(state.execute_control("""
+	assert_false(state.execute("""
 		remote.add_interface = function() end
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_false(state.get_errors().is_empty())
 	assert_false(state.finish_setup())
@@ -219,7 +219,7 @@ func test_activate_with_nested_runtime_api() -> void:
 
 	assert_true(api.register_function("player.stats", "get_health", _get_test_value))
 
-	assert_true(state.execute_control("""
+	assert_true(state.execute("""
 		assert(game == nil)
 
 		script.on_init(function()
@@ -227,7 +227,7 @@ func test_activate_with_nested_runtime_api() -> void:
 			assert(game.player.stats ~= nil)
 			assert(game.player.stats.get_health() == 42)
 		end)
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_true(state.finish_setup())
 	assert_true(state.activate({}, api))
@@ -240,13 +240,13 @@ func test_legacy_and_registered_runtime_apis_coexist() -> void:
 	assert_true(api.register_function("player", "get_health", _get_test_value))
 	assert_true(api.register_function("", "get_registry_value", _get_test_value))
 
-	assert_true(state.execute_control("""
+	assert_true(state.execute("""
 		script.on_init(function()
 			assert(game.get_test_value() == 42)
 			assert(game.get_registry_value() == 42)
 			assert(game.player.get_health() == 42)
 		end)
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_true(state.finish_setup())
 
@@ -262,13 +262,13 @@ func test_cannot_replace_nested_game_api_function() -> void:
 
 	assert_true(api.register_function("player", "get_health", _get_test_value))
 
-	assert_true(state.execute_control("""
+	assert_true(state.execute("""
 		script.on_init(function()
 			game.player.get_health = function()
 				return 999
 			end
 		end)
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_true(state.finish_setup())
 	assert_true(state.activate({}, api))
@@ -282,11 +282,11 @@ func test_cannot_replace_game_api_namespace() -> void:
 
 	assert_true(api.register_function("player.stats", "get_health", _get_test_value))
 
-	assert_true(state.execute_control("""
+	assert_true(state.execute("""
 		script.on_init(function()
 			game.player.stats = {}
 		end)
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
 	assert_true(state.finish_setup())
 	assert_true(state.activate({}, api))
@@ -331,19 +331,19 @@ func test_registered_runtime_api_is_isolated_between_lua_states() -> void:
 	var second := RuntimeState.new("demo_a")
 	assert_true(second.start())
 
-	assert_true(state.execute_control("""
+	assert_true(state.execute("""
 		script.on_init(function()
 			game.player.extra = 123
 			assert(game.player.get_health() == 42)
 		end)
-	""", "core/control.lua"))
+	""", "", "core/control.lua"))
 
-	assert_true(second.execute_control("""
+	assert_true(second.execute("""
 		script.on_init(function()
 			assert(game.player.extra == nil)
 			assert(game.player.get_health() == 42)
 		end)
-	""", "demo_a/control.lua"))
+	""", "", "demo_a/control.lua"))
 
 	assert_true(state.finish_setup())
 	assert_true(second.finish_setup())
