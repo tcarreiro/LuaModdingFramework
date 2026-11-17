@@ -1,6 +1,7 @@
 extends Node
 
 const GAME_VERSION := "0.1.0"
+
 const RUNTIME_SAVE_PATH := "user://lua_modder_playground.save"
 
 const LOOT_SCRIPT = preload("res://example/content/content_loot.gd")
@@ -14,7 +15,7 @@ const CARD_SCRIPT = preload("res://example/content/content_card.gd")
 var mod_manager: ModManager
 var selected_mods: Array[ModManifest] = []
 var selected_mod_ids: Array[String] = []
-var settings_registry: ModSettingsRegistry
+var settings_registry: SettingsRegistry
 var selected_settings: Dictionary[String, Variant] = {}
 var content_registry: ContentRegistry
 
@@ -25,7 +26,7 @@ var prepare_warnings: Array[String] = []
 # Content stage
 var content_errors: Array[String] = []
 
-# Runtime stage (owned by the example game, not the framework)
+# Runtime stage
 var runtime_manager: RuntimeManager
 var runtime_errors: Array[String] = []
 var runtime_log: Array[String] = []
@@ -45,6 +46,7 @@ func get_available_mods() -> Array[ModManifest]:
 
 func prepare_new_game(mod_ids: Array[String]) -> bool:
 	stop_runtime()
+	
 	selected_mods.clear()
 	selected_mod_ids.clear()
 	selected_settings.clear()
@@ -81,7 +83,6 @@ func prepare_new_game(mod_ids: Array[String]) -> bool:
 
 
 func run_content_stage() -> bool:
-	stop_runtime()
 	content_registry = null
 	content_errors.clear()
 
@@ -89,56 +90,67 @@ func run_content_stage() -> bool:
 		content_errors.append("Settings Stage must be completed before Content Stage.")
 		return false
 
-	var content_types := _register_content_types()
+	var content_types := ContentTypeRegistry.new()
+
+	# Templates
+	content_types.register_type("loot", LOOT_SCRIPT, _validate_loot)
+	content_types.register_type("equipment", EQUIPMENT_SCRIPT)
+	content_types.register_type("gauntlet", GAUNTLET_SCRIPT, _validate_gauntlet)
+	content_types.register_type("card", CARD_SCRIPT)
+	content_types.register_type("item-container", CONTAINER_SCRIPT)
+
+	# Structs
+	content_types.register_struct("item-stack", STACK_SCRIPT)
+	content_types.register_struct_binding("equipment", "attached_items", "item-stack")
+
+	# References
+	content_types.register_reference("item-stack", "item_id", "loot")
+	content_types.register_reference("equipment", "material_id", "loot")
+
 	if not content_types.errors.is_empty():
 		content_errors.append_array(content_types.errors)
 		return false
 
-	var startup_settings := _collect_startup_settings()
-	if not content_errors.is_empty():
-		return false
+	var startup_settings: Dictionary = {}
+
+	for setting in settings_registry.get_all_settings():
+		if setting.scope != ModSetting.STARTUP:
+			continue
+
+		if not selected_settings.has(setting.id):
+			content_errors.append("Missing startup setting '%s'." % setting.id)
+			return false
+
+		startup_settings[setting.id] = selected_settings[setting.id]
 
 	var loader := ContentLoader.new(content_types)
 	content_registry = loader.run(selected_mods, startup_settings)
+
 	content_errors.append_array(loader.errors)
 	return content_registry != null
 
 
-func _register_content_types() -> ContentTypeRegistry:
-	var types := ContentTypeRegistry.new()
-	# Templates
-	types.register_type("loot", LOOT_SCRIPT, _validate_loot)
-	types.register_type("equipment", EQUIPMENT_SCRIPT)
-	types.register_type("gauntlet", GAUNTLET_SCRIPT, _validate_gauntlet)
-	types.register_type("card", CARD_SCRIPT)
-	types.register_type("item-container", CONTAINER_SCRIPT)
-	# Structs
-	types.register_struct("item-stack", STACK_SCRIPT)
-	types.register_struct_binding("equipment", "attached_items", "item-stack")
-	# References
-	types.register_reference("item-stack", "item_id", "loot")
-	types.register_reference("equipment", "material_id", "loot")
-	return types
+func _validate_loot(data: Dictionary) -> String:
+	if data.has("max_stack") and data["max_stack"] < 1:
+		return "max_stack must be greater than zero."
+
+	if data.has("weight") and data["weight"] < 0.0:
+		return "weight cannot be negative."
+
+	return ""
 
 
-func _collect_startup_settings() -> Dictionary:
-	var values: Dictionary = {}
-	for setting in settings_registry.get_all_settings():
-		if setting.scope != ModSetting.STARTUP:
-			continue
-		if not selected_settings.has(setting.id):
-			content_errors.append("Missing startup setting '%s'." % setting.id)
-			return {}
-		values[setting.id] = selected_settings[setting.id]
-	return values
+func _validate_gauntlet(data: Dictionary) -> String:
+	if data.get("socket_count", 1) < 1:
+		return "socket_count must be greater than zero."
+
+	return ""
 
 
-#region Runtime playground
 func start_new_runtime() -> bool:
 	world_time = 0
 	runtime_log.clear()
 	return _start_runtime()
-
 
 func _start_runtime(existing_mod_ids: Array[String] = [], saved_storage: Dictionary = {}) -> bool:
 	stop_runtime()
@@ -148,14 +160,21 @@ func _start_runtime(existing_mod_ids: Array[String] = [], saved_storage: Diction
 		runtime_errors.append("Content Stage must be completed before Runtime Stage.")
 		return false
 
-	var api := _create_runtime_api()
+	var api := RuntimeApiRegistry.new()
+	api.register_function("world", "get_time", Callable(self, "_runtime_get_time"))
+	api.register_function("player", "get_name", Callable(self, "_runtime_get_player_name"))
+	api.register_function("settings", "get_enemy_speed", Callable(self, "_runtime_get_enemy_speed"))
+	api.register_function("debug", "log", Callable(self, "_runtime_log_message"))
+
 	if not api.errors.is_empty():
 		runtime_errors.append_array(api.errors)
 		return false
 
 	runtime_manager = RuntimeManager.new()
+
 	if not runtime_manager.prepare(selected_mods):
 		return _runtime_failed()
+
 	if not runtime_manager.activate({}, existing_mod_ids, null, saved_storage, api):
 		return _runtime_failed()
 
@@ -163,22 +182,16 @@ func _start_runtime(existing_mod_ids: Array[String] = [], saved_storage: Diction
 	return true
 
 
-func _create_runtime_api() -> RuntimeApiRegistry:
-	var api := RuntimeApiRegistry.new()
-	api.register_function("world", "get_time", Callable(self, "_runtime_get_time"))
-	api.register_function("player", "get_name", Callable(self, "_runtime_get_player_name"))
-	api.register_function("settings", "get_enemy_speed", Callable(self, "_runtime_get_enemy_speed"))
-	api.register_function("debug", "log", Callable(self, "_runtime_log_message"))
-	return api
-
-
 func advance_tick() -> bool:
 	if not is_runtime_active():
 		runtime_errors.append("Runtime Stage is not active.")
 		return false
+
 	world_time += 1
+
 	if not runtime_manager.emit_event("on_tick", {"tick": world_time}):
 		return _runtime_failed()
+
 	return true
 
 
@@ -187,142 +200,144 @@ func is_runtime_active() -> bool:
 
 
 func stop_runtime() -> void:
-	if runtime_manager == null:
-		return
-	runtime_manager.close()
-	runtime_manager = null
+	if runtime_manager != null:
+		runtime_manager.close()
+		runtime_manager = null
 
 
 func _runtime_failed() -> bool:
 	if runtime_manager != null:
 		runtime_errors.append_array(runtime_manager.get_errors())
+
 	stop_runtime()
 	return false
 
 
-#region Runtime persistence
+#region Persistence
+
 func save_runtime() -> bool:
 	runtime_errors.clear()
+
 	if not is_runtime_active():
 		runtime_errors.append("Cannot save an inactive Runtime Stage.")
 		return false
 
 	var snapshots := runtime_manager.snapshot_storage()
 	if snapshots.is_empty() and not runtime_manager.get_mod_ids().is_empty():
-		runtime_errors.append_array(runtime_manager.get_errors())
-		return false
+		return _runtime_failed()
 
 	var file := FileAccess.open(RUNTIME_SAVE_PATH, FileAccess.WRITE)
 	if file == null:
 		runtime_errors.append("Cannot create save file: %s" % error_string(FileAccess.get_open_error()))
 		return false
 
-	file.store_var(_build_save_data(snapshots), false)
-	file.close()
-	_add_runtime_log("Storage salvo em %s" % RUNTIME_SAVE_PATH)
-	return true
-
-
-func _build_save_data(snapshots: Dictionary) -> Dictionary:
-	return {
+	file.store_var({
 		"version": 1,
 		"selected_mod_ids": selected_mod_ids.duplicate(),
 		"selected_settings": selected_settings.duplicate(true),
 		"runtime_mod_ids": runtime_manager.get_mod_ids(),
 		"storage": snapshots,
 		"world_time": world_time
-	}
+	}, false)
+	file.close()
+
+	_add_runtime_log("Storage salvo em %s" % RUNTIME_SAVE_PATH)
+	return true
 
 
 func save_and_restore_runtime() -> bool:
 	if not save_runtime():
 		return false
+
 	stop_runtime()
 	return restore_runtime()
 
 
 func restore_runtime() -> bool:
 	runtime_errors.clear()
-	var saved := _read_save_data()
-	if saved.is_empty():
+
+	var file := FileAccess.open(RUNTIME_SAVE_PATH, FileAccess.READ)
+	if file == null:
+		runtime_errors.append("Cannot read save file: %s" % error_string(FileAccess.get_open_error()))
 		return false
 
-	var selected_ids := _read_saved_mod_ids(saved["selected_mod_ids"])
-	var existing_ids := _read_saved_mod_ids(saved["runtime_mod_ids"])
-	if not runtime_errors.is_empty():
+	var saved: Variant = file.get_var(false)
+	file.close()
+
+	if not saved is Dictionary or saved.get("version") != 1:
+		runtime_errors.append("Invalid playground save format.")
 		return false
+
+	var raw_selected: Variant = saved.get("selected_mod_ids")
+	var raw_existing: Variant = saved.get("runtime_mod_ids")
+	var raw_settings: Variant = saved.get("selected_settings")
+	var raw_storage: Variant = saved.get("storage")
+	var raw_time: Variant = saved.get("world_time")
+
+	if not raw_selected is Array or not raw_existing is Array \
+			or not raw_settings is Dictionary or not raw_storage is Dictionary \
+			or typeof(raw_time) != TYPE_INT:
+		runtime_errors.append("Playground save contains invalid fields.")
+		return false
+
+	var selected_ids: Array[String] = []
+	var existing_ids: Array[String] = []
+
+	for id in raw_selected:
+		if typeof(id) != TYPE_STRING:
+			runtime_errors.append("Invalid selected mod ID in save.")
+			return false
+		selected_ids.append(id)
+
+	for id in raw_existing:
+		if typeof(id) != TYPE_STRING:
+			runtime_errors.append("Invalid active runtime mod ID in save.")
+			return false
+		existing_ids.append(id)
 
 	if not prepare_new_game(selected_ids):
 		runtime_errors.append_array(prepare_errors)
 		return false
 
-	if not _restore_selected_settings(saved["selected_settings"]):
-		return false
+	var restored_settings: Dictionary[String, Variant] = {}
+
+	for setting in settings_registry.get_all_settings():
+		if not raw_settings.has(setting.id):
+			runtime_errors.append("Missing saved setting '%s'." % setting.id)
+			return false
+
+		var value: Variant = raw_settings[setting.id]
+		var validation_error := setting.validate_value(value)
+
+		if not validation_error.is_empty():
+			runtime_errors.append("Invalid saved setting '%s': %s" % [setting.id, validation_error])
+			return false
+
+		if setting.is_forced() and value != setting.get_effective_value():
+			runtime_errors.append("Forced setting '%s' differs from the current value." % setting.id)
+			return false
+
+		restored_settings[setting.id] = value
+
+	selected_settings = restored_settings
+
 	if not run_content_stage():
 		runtime_errors.append_array(content_errors)
 		return false
 
-	world_time = saved["world_time"]
-	if not _start_runtime(existing_ids, saved["storage"]):
+	world_time = raw_time
+
+	if not _start_runtime(existing_ids, raw_storage):
 		return false
+
 	_add_runtime_log("Storage restaurado; on_load executado para os mods existentes.")
 	return true
 
-
-func _read_save_data() -> Dictionary:
-	var file := FileAccess.open(RUNTIME_SAVE_PATH, FileAccess.READ)
-	if file == null:
-		runtime_errors.append("Cannot read save file: %s" % error_string(FileAccess.get_open_error()))
-		return {}
-	var saved: Variant = file.get_var(false)
-	file.close()
-	if not _is_valid_save_data(saved):
-		runtime_errors.append("Invalid playground save format or fields.")
-		return {}
-	return saved
-
-
-func _is_valid_save_data(saved: Variant) -> bool:
-	if not saved is Dictionary or saved.get("version") != 1:
-		return false
-	return saved.get("selected_mod_ids") is Array \
-		and saved.get("runtime_mod_ids") is Array \
-		and saved.get("selected_settings") is Dictionary \
-		and saved.get("storage") is Dictionary \
-		and typeof(saved.get("world_time")) == TYPE_INT
-
-
-func _read_saved_mod_ids(raw_ids: Array) -> Array[String]:
-	var ids: Array[String] = []
-	for id in raw_ids:
-		if typeof(id) != TYPE_STRING:
-			runtime_errors.append("Invalid mod ID in playground save.")
-			return []
-		ids.append(id)
-	return ids
-
-
-func _restore_selected_settings(saved: Dictionary) -> bool:
-	var restored: Dictionary[String, Variant] = {}
-	for setting in settings_registry.get_all_settings():
-		if not saved.has(setting.id):
-			runtime_errors.append("Missing saved setting '%s'." % setting.id)
-			return false
-		var value: Variant = saved[setting.id]
-		var validation_error := setting.validate_value(value)
-		if not validation_error.is_empty():
-			runtime_errors.append("Invalid saved setting '%s': %s" % [setting.id, validation_error])
-			return false
-		if setting.is_forced() and value != setting.get_effective_value():
-			runtime_errors.append("Forced setting '%s' differs from the current value." % setting.id)
-			return false
-		restored[setting.id] = value
-	selected_settings = restored
-	return true
 #endregion
 
 
 #region Consumer API
+
 func _runtime_get_time() -> int:
 	return world_time
 
@@ -342,22 +357,3 @@ func _runtime_log_message(message: Variant) -> void:
 func _add_runtime_log(message: String) -> void:
 	runtime_log.append(message)
 	print("[RuntimePlayground] ", message)
-#endregion
-#endregion
-
-
-func _validate_loot(data: Dictionary) -> String:
-	if data.has("max_stack") and data["max_stack"] < 1:
-		return "max_stack must be greater than zero."
-
-	if data.has("weight") and data["weight"] < 0.0:
-		return "weight cannot be negative."
-
-	return ""
-
-
-func _validate_gauntlet(data: Dictionary) -> String:
-	if data.get("socket_count", 1) < 1:
-		return "socket_count must be greater than zero."
-
-	return ""

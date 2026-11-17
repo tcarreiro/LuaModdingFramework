@@ -1,6 +1,11 @@
-class_name RuntimeLoader extends FileLoader
+
+class_name RuntimeLoader extends RefCounted
 
 const CONTROL_FILE_NAME := "control.lua"
+const MAX_CONTROL_FILE_BYTES := 1 * 1024 * 1024
+
+var errors: Array[String] = []
+
 
 func has_control(manifest: ModManifest) -> bool:
 	return FileAccess.file_exists(get_control_path(manifest))
