@@ -115,7 +115,9 @@ func prepare(mods: Array[ModManifest]) -> bool:
 	return true
 
 
-func activate(game_functions: Dictionary = {}, existing_mod_ids: Array[String] = [], configuration_changes: Variant = null, saved_storage: Dictionary = {}) -> bool:
+func activate(game_functions: Dictionary = {}, existing_mod_ids: Array[String] = [],
+		configuration_changes: Variant = null, saved_storage: Dictionary = {},
+		api_registry: RuntimeApiRegistry = null) -> bool:
 	if _phase != Phase.PREPARED:
 		errors.append("Runtime Stage must be prepared before activation.")
 		return false
@@ -130,14 +132,31 @@ func activate(game_functions: Dictionary = {}, existing_mod_ids: Array[String] =
 		if not callback is Callable or not callback.is_valid():
 			errors.append("Invalid runtime API function '%s'." % function_name)
 			return false
-
+	
+	if api_registry != null:
+		if not api_registry.errors.is_empty():
+			errors.append("Runtime API registry contains registration errors: %s" % str(api_registry.errors))
+			return false
+		var registered_functions := api_registry.get_functions()
+		for full_path in registered_functions:
+			var callback: Callable = registered_functions[full_path]
+			if not callback.is_valid():
+				errors.append("Invalid registered runtime API function '%s'." % full_path)
+				return false
+			for function_name in game_functions:
+				if full_path == function_name or full_path.begins_with(String(function_name) + "."):
+					errors.append("Runtime API path '%s' conflicts with legacy function '%s'." % [
+						full_path, function_name
+					])
+					return false
+	
 	if configuration_changes != null and typeof(configuration_changes) != TYPE_DICTIONARY:
 		errors.append("Configuration changes must be a Dictionary or null.")
 		return false
 	
 	for mod_id in _ordered_ids:
 		var state: RuntimeState = _states[mod_id]
-		if not state.activate(game_functions):
+		if not state.activate(game_functions, api_registry):
 			errors.append_array(state.get_errors())
 			_fail()
 			return false

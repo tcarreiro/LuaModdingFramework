@@ -1212,3 +1212,134 @@ func test_remote_call_rejects_function_return() -> void:
 	assert_false(runtime.activate())
 	assert_eq(runtime.get_phase(), RuntimeManager.Phase.FAILED)
 	assert_false(runtime.get_errors().is_empty())
+
+
+func test_manager_activates_with_runtime_api_registry() -> void:
+	var api := RuntimeApiRegistry.new()
+
+	assert_true(api.register_function("player", "get_health", _get_test_value))
+	assert_true(api.register_function("player.stats", "get_level", _get_test_value))
+
+	_write_file("core", "control.lua", """
+		assert(game == nil)
+
+		script.on_init(function()
+			assert(game.player.get_health() == 42)
+			assert(game.player.stats.get_level() == 42)
+			game.record("api_initialized")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+
+	assert_true(runtime.activate({
+		"record": _record_lifecycle_call
+	}, [], null, {}, api), str(runtime.get_errors()))
+
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.ACTIVE)
+	assert_eq(lifecycle_calls, ["api_initialized"])
+
+
+func test_manager_distributes_api_without_sharing_lua_tables() -> void:
+	_create_mod("demo_a")
+
+	var api := RuntimeApiRegistry.new()
+	assert_true(api.register_function("player", "get_health", _get_test_value))
+
+	_write_file("core", "control.lua", """
+		script.on_init(function()
+			assert(game.player.get_health() == 42)
+			game.player.extra = "core_only"
+			game.record("core")
+		end)
+	""")
+
+	_write_file("demo_a", "control.lua", """
+		script.on_init(function()
+			assert(game.player.get_health() == 42)
+			assert(game.player.extra == nil)
+			game.record("demo_a")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods(["demo_a"])))
+
+	assert_true(runtime.activate({
+		"record": _record_lifecycle_call
+	}, [], null, {}, api), str(runtime.get_errors()))
+
+	assert_eq(lifecycle_calls, ["core", "demo_a"])
+
+
+func test_registered_api_respects_on_load_restrictions() -> void:
+	var api := RuntimeApiRegistry.new()
+	assert_true(api.register_function("player", "get_health", _get_test_value))
+
+	_write_file("core", "control.lua", """
+		assert(game == nil)
+
+		script.on_load(function()
+			assert(game == nil)
+		end)
+
+		script.on_configuration_changed(function()
+			assert(game.player.get_health() == 42)
+			game.record("configuration")
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+
+	assert_true(runtime.activate({
+		"record": _record_lifecycle_call
+	}, ["core"], {}, {}, api), str(runtime.get_errors()))
+
+	assert_eq(lifecycle_calls, ["configuration"])
+
+
+func test_manager_rejects_legacy_and_registry_api_conflicts() -> void:
+	var api := RuntimeApiRegistry.new()
+	assert_true(api.register_function("player", "get_health", _get_test_value))
+
+	_write_file("core", "control.lua", """
+		script.on_init(function()
+			assert(game.player.get_health() == 42)
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+
+	assert_false(runtime.activate({
+		"player": _get_test_value
+	}, [], null, {}, api))
+
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.PREPARED)
+	assert_true(str(runtime.get_errors()).contains("conflicts with legacy function"))
+
+	assert_true(runtime.activate({}, [], null, {}, api), str(runtime.get_errors()))
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.ACTIVE)
+
+
+func test_manager_rejects_invalid_runtime_api_registry() -> void:
+	var api := RuntimeApiRegistry.new()
+
+	assert_true(api.register_function("player", "get_health", _get_test_value))
+	assert_false(api.register_function("player", "get_health", _get_test_value))
+
+	_write_file("core", "control.lua", """
+		script.on_init(function()
+			assert(game.player.get_health() == 42)
+		end)
+	""")
+
+	assert_true(runtime.prepare(_resolve_mods()))
+
+	assert_false(runtime.activate({}, [], null, {}, api))
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.PREPARED)
+	assert_true(str(runtime.get_errors()).contains("registration errors"))
+
+	api.clear()
+	assert_true(api.register_function("player", "get_health", _get_test_value))
+
+	assert_true(runtime.activate({}, [], null, {}, api), str(runtime.get_errors()))
+	assert_eq(runtime.get_phase(), RuntimeManager.Phase.ACTIVE)
