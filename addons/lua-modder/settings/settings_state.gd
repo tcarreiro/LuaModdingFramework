@@ -1,5 +1,4 @@
-@tool
-class_name SettingsState extends RefCounted
+class_name SettingsState extends State
 
 const DEFINITION_FIELDS := [
 	ModSetting.ID, ModSetting.DISPLAY_NAME, ModSetting.DESCRIPTION, ModSetting.ORDER,
@@ -31,20 +30,15 @@ const INTEGER_FIELDS := [
 	ModSetting.ALLOWED_VALUES,
 ]
 
-var errors: Array[String] = []
-
-var _lua_state: LuaState
-var _registry: ModSettingsRegistry
-var _current_mod_id: String = ""
+var _registry: SettingsRegistry
 var _settings_api: LuaTable
 var _settings_functions: Dictionary = {}
-var _execution_guard := LuaExecutionGuard.new()
 
 func start() -> void:
 	close()
 	errors.clear()
 	
-	_registry = ModSettingsRegistry.new()
+	_registry = SettingsRegistry.new()
 	_lua_state = LuaState.new()
 	
 	var libraries := LuaState.LUA_BASE | LuaState.LUA_STRING | \
@@ -73,19 +67,15 @@ func is_active() -> bool:
 func get_errors() -> Array[String]:
 	var result: Array[String] = []
 	result.append_array(errors)
-
 	if _registry != null:
 		result.append_array(_registry.errors)
-
 	return result
 
 
 func get_warnings() -> Array[String]:
 	var result: Array[String] = []
-
 	if _registry != null:
 		result.append_array(_registry.warnings)
-
 	return result
 
 
@@ -93,38 +83,36 @@ func execute(source: String, mod_id: String, chunk_name: String = "") -> bool:
 	if not is_active():
 		errors.append("SettingsState is not active.")
 		return false
-
+	
 	if not errors.is_empty() or not _registry.errors.is_empty():
 		return false
-
+	
 	if mod_id.strip_edges().is_empty():
 		errors.append("Cannot execute settings without a mod ID.")
 		return false
-
+	
 	_current_mod_id = mod_id
 	var success := _execution_guard.execute(_lua_state, source, chunk_name)
 	_current_mod_id = ""
-
+	
 	if not success:
 		errors.append("Lua error in mod '%s' (%s): %s" % [
 			mod_id, chunk_name, _execution_guard.last_error
 		])
 		return false
-
+	
 	if not errors.is_empty() or not _registry.errors.is_empty():
 		return false
-
+	
 	return _validate_settings_api(mod_id)
 
 
-func finish() -> ModSettingsRegistry:
+func finish() -> SettingsRegistry:
 	if not is_active():
 		errors.append("SettingsState is not active")
 		return null
-	
 	var registry := _registry if errors.is_empty() and _registry.errors.is_empty() else null
 	close()
-	
 	return registry
 
 
@@ -138,22 +126,13 @@ func close() -> void:
 	_current_mod_id = ""
 
 
-func define_from_json(definition: Dictionary, mod_id: String) -> bool:
-	if not is_active():
-		errors.append("SettingsState is not active.")
-		return false
-	
-	if not errors.is_empty() or not _registry.errors.is_empty():
-		return false
-	
-	if mod_id.strip_edges().is_empty():
-		errors.append("Cannot define settings without a mod ID.")
+func define_from_json(data: Dictionary, mod_id: String) -> bool:
+	if not super.define_from_json(data, mod_id):
 		return false
 
 	var previous_mod_id := _current_mod_id
 	_current_mod_id = mod_id
-
-	var result := _define_setting(definition.duplicate(true))
+	var result := _define_setting(data.duplicate(true))
 
 	_current_mod_id = previous_mod_id
 	return result
@@ -277,7 +256,6 @@ func _lua_force(id: Variant, value: Variant) -> bool:
 		value = LuaUtils.normalize_integer(value)
 	
 	return _registry.force(id, value, _current_mod_id)
-
 
 
 func _validate_settings_api(mod_id: String) -> bool:

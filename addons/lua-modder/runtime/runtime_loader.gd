@@ -1,7 +1,8 @@
+
 class_name RuntimeLoader extends RefCounted
 
 const CONTROL_FILE_NAME := "control.lua"
-const MAX_CONTROL_FILE_BYTES := 1024 * 1024
+const MAX_CONTROL_FILE_BYTES := 1 * 1024 * 1024
 
 var errors: Array[String] = []
 

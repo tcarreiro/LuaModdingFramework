@@ -79,53 +79,46 @@ func _scan_root(root_path: String) -> void:
 
 
 func _read_manifest(path: String, root_path: String) -> ModManifest:
-	var file:= FileAccess.open(path, FileAccess.READ)
+	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:
-		discovery_errors.append("Cannot open manifest: %s"%[path])
+		discovery_errors.append("Cannot open manifest: %s" % path)
 		return null
-	
 	if file.get_length() > 4 * 1024 * 1024:
 		discovery_errors.append("JSON file exceeds maximum allowed size: '%s'." % path)
 		return null
-	
-	var json:= JSON.new()
-	var error:= json.parse(file.get_as_text())
-	
-	if error != OK:
-		discovery_errors.append("Invalid JSON in '%s' at line %d: %s"%[path, json.get_error_line(), json.get_error_message()])
+
+	var json := JSON.new()
+	if json.parse(file.get_as_text()) != OK:
+		discovery_errors.append("Invalid JSON in '%s' at line %d: %s" % [path, json.get_error_line(), json.get_error_message()])
 		return null
-	
 	if typeof(json.data) != TYPE_DICTIONARY:
-		discovery_errors.append("Manifest must contain a JSON object: %s"%[path])
+		discovery_errors.append("Manifest must contain a JSON object: %s" % path)
 		return null
-	
-	var data: Dictionary = json.data
-	var id_value:Variant = data.get("id", "")
-	var id:= String(id_value).strip_edges()
-	var version_value:Variant = data.get("version", "")
-	var game_version_value := data.get("game_version", "")
-	
+	return _parse_manifest_data(json.data, path, root_path)
+
+
+func _parse_manifest_data(data: Dictionary, path: String, root_path: String) -> ModManifest:
+	var id_value: Variant = data.get("id", "")
+	var id := String(id_value).strip_edges()
+	var version_value: Variant = data.get("version", "")
+	var game_version_value: Variant = data.get("game_version", "")
 	if typeof(id_value) != TYPE_STRING or not ModDependency.is_valid_mod_id(id_value):
-		discovery_errors.append("Invalid or missing mod ID: %s"%[path])
+		discovery_errors.append("Invalid or missing mod ID: %s" % path)
 		return null
-	
 	if typeof(version_value) != TYPE_STRING or not ModVersion.is_valid(version_value):
 		discovery_errors.append("Invalid or missing mod version: %s" % path)
 		return null
-	
 	if typeof(game_version_value) != TYPE_STRING or not ModVersion.is_compatibility_line(game_version_value):
-		discovery_errors.append("Invalid game_version in %s"%[path])
+		discovery_errors.append("Invalid game_version in %s" % path)
 		return null
-	
 	if id.contains("/") or id.contains("\\") or id.contains(":"):
-		discovery_errors.append("Invalid characters in mod ID '%s'."%[id])
+		discovery_errors.append("Invalid characters in mod ID '%s'." % id)
 		return null
-	
 	var dependency_values: Variant = data.get("dependencies", [])
 	if typeof(dependency_values) != TYPE_ARRAY:
-		discovery_errors.append("Dependencies must be an Array: %s."%[path])
+		discovery_errors.append("Dependencies must be an Array: %s." % path)
 		return null
-	
+
 	var manifest := ModManifest.new()
 	manifest.id = id
 	manifest.version = version_value
@@ -134,21 +127,23 @@ func _read_manifest(path: String, root_path: String) -> ModManifest:
 	manifest.description = String(data.get("description", ""))
 	manifest.author = String(data.get("author", ""))
 	manifest.root_path = root_path
-	
+	if not _parse_dependencies(manifest, dependency_values, path):
+		return null
+	return manifest
+
+
+func _parse_dependencies(manifest: ModManifest, dependency_values: Array, path: String) -> bool:
 	for entry in dependency_values:
 		if typeof(entry) != TYPE_STRING:
-			discovery_errors.append("Invalid dependency in %s"%[path])
-			return null
-		
+			discovery_errors.append("Invalid dependency in %s" % path)
+			return false
 		var dependency := ModDependency.parse(entry)
 		if dependency == null:
-			discovery_errors.append("Invalid dependency '%s' in '%s'"%[entry, path])
-			return null
-		
+			discovery_errors.append("Invalid dependency '%s' in '%s'" % [entry, path])
+			return false
 		if not manifest.dependencies.has(dependency):
 			manifest.dependencies.append(dependency)
-	
-	return manifest
+	return true
 
 
 func get_available_mods() -> Array[ModManifest]:
@@ -170,82 +165,80 @@ func get_manifest(id: String) -> ModManifest:
 
 func resolve(requested_ids: Array[String]) -> Array[ModManifest]:
 	resolution_errors.clear()
-	
-	var ordered:Array[ModManifest] = []
-	
+	var ordered: Array[ModManifest] = []
 	if not ModVersion.is_valid(game_version):
-		resolution_errors.append("Invalid current game version: %s"%game_version)
+		resolution_errors.append("Invalid current game version: %s" % game_version)
 		return ordered
-	
+
+	var enabled := _collect_enabled_mods(requested_ids)
+	if not resolution_errors.is_empty():
+		return ordered
+	if not _validate_enabled_mods(enabled):
+		return ordered
+	return _sort_enabled_mods(enabled)
+
+
+func _collect_enabled_mods(requested_ids: Array[String]) -> Dictionary[String, bool]:
 	var enabled: Dictionary[String, bool] = {}
 	var queue: Array[String] = [CORE_MOD_ID]
-	
 	for id in requested_ids:
 		if not queue.has(id):
 			queue.append(id)
-	
 	var index := 0
-	
 	while index < queue.size():
 		var id := queue[index]
 		index += 1
-		
 		if enabled.has(id):
 			continue
-		
 		if _duplicated_ids.has(id):
-			resolution_errors.append("Mod '%s' has a duplicated ID."%id)
-			return ordered
-		
+			resolution_errors.append("Mod '%s' has a duplicated ID." % id)
+			return enabled
 		var manifest := get_manifest(id)
 		if manifest == null:
 			var required_by := queue.back() if not queue.is_empty() else "mod selection"
-			resolution_errors.append("Mod '%s' was not found (required by '%s')."%[id, required_by])
-			return ordered
-		
+			resolution_errors.append("Mod '%s' was not found (required by '%s')." % [id, required_by])
+			return enabled
 		enabled[id] = true
-		
 		for dependency in manifest.dependencies:
 			if dependency.is_required() and not enabled.has(dependency.id):
 				if not queue.has(dependency.id):
 					queue.append(dependency.id)
-	
+	return enabled
+
+
+func _validate_enabled_mods(enabled: Dictionary[String, bool]) -> bool:
 	for id in enabled:
 		var manifest := _manifests[id]
-		
 		if not ModVersion.matches_game_version(game_version, manifest.game_version):
 			resolution_errors.append("Mod '%s' targets game compatibility line %s, but the current game version is %s." % [id, manifest.game_version, game_version])
-		
 		for dependency in manifest.dependencies:
 			_validate_dependency(manifest, dependency, enabled)
-		
 		if not resolution_errors.is_empty():
-			return ordered
-	
+			return false
+	return true
+
+
+func _sort_enabled_mods(enabled: Dictionary[String, bool]) -> Array[ModManifest]:
+	var ordered: Array[ModManifest] = []
 	var states: Dictionary[String, int] = {}
 	var depths: Dictionary[String, int] = {}
 	var chain: Array[String] = []
-	
 	for id in enabled:
 		if _calculate_depth(id, enabled, states, depths, chain) < 0:
 			return ordered
-	
 	for id in enabled:
 		ordered.append(_manifests[id])
-	
 	ordered.sort_custom(func(a: ModManifest, b: ModManifest) -> bool:
 		if depths[a.id] != depths[b.id]:
 			return depths[a.id] < depths[b.id]
 		return a.id.naturalcasecmp_to(b.id) < 0
 	)
-	
 	return ordered
 
 
 func _validate_dependency(manifest: ModManifest, dependency: ModDependency,
 							enabled: Dictionary[String, bool]) -> void:
 	var exists := enabled.has(dependency.id)
-	
 	if dependency.type == ModDependency.Type.INCOMPATIBLE:
 		if exists:
 			resolution_errors.append("Mod '%s' is incompatible with '%s'."%[manifest.id, dependency.id])
@@ -257,7 +250,6 @@ func _validate_dependency(manifest: ModManifest, dependency: ModDependency,
 		return
 		
 	var target := _manifests[dependency.id]
-	
 	if not ModVersion.satisfies(target.version, dependency.operator, dependency.version):
 		resolution_errors.append("Mod '%s' requires '%s %s %s', but found %s." % [
 			manifest.id, dependency.id, dependency.operator, dependency.version, target.version

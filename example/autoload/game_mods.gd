@@ -15,7 +15,7 @@ const CARD_SCRIPT = preload("res://example/content/content_card.gd")
 var mod_manager: ModManager
 var selected_mods: Array[ModManifest] = []
 var selected_mod_ids: Array[String] = []
-var settings_registry: ModSettingsRegistry
+var settings_registry: SettingsRegistry
 var selected_settings: Dictionary[String, Variant] = {}
 var content_registry: ContentRegistry
 

@@ -190,28 +190,21 @@ func _validate_scalar(value: Variant, expected_type: int, path: String) -> Varia
 	match expected_type:
 		TYPE_INT:
 			var normalized := LuaUtils.normalize_integer(value)
-
 			if typeof(normalized) == TYPE_INT:
 				return normalized
-
 		TYPE_FLOAT:
 			if typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT:
 				var number := float(value)
-
 				if is_finite(number):
 					return number
-
 		TYPE_STRING_NAME:
 			if typeof(value) == TYPE_STRING or typeof(value) == TYPE_STRING_NAME:
 				return StringName(value)
-
 		TYPE_COLOR:
 			return _validate_color(value, path)
-
 		_:
 			if typeof(value) == expected_type:
 				return value
-
 	_add_type_error(path, expected_type, value)
 	return value
 
@@ -219,30 +212,29 @@ func _validate_scalar(value: Variant, expected_type: int, path: String) -> Varia
 func _validate_color(value: Variant, path: String) -> Variant:
 	if typeof(value) == TYPE_COLOR:
 		return value
-
+	
 	if typeof(value) != TYPE_DICTIONARY:
 		_add_type_error(path, TYPE_COLOR, value)
 		return value
-
+	
 	for channel in ["r", "g", "b"]:
 		if not value.has(channel):
 			errors.append("%s: missing color channel '%s'." % [path, channel])
 			return value
-
+	
 	for channel in ["r", "g", "b", "a"]:
 		if not value.has(channel):
 			continue
-
+	
 		var component: Variant = value[channel]
-
 		if typeof(component) != TYPE_INT and typeof(component) != TYPE_FLOAT:
 			errors.append("%s.%s: color channel must be numeric." % [path, channel])
 			return value
-
+	
 		if not is_finite(float(component)):
 			errors.append("%s.%s: color channel must be finite." % [path, channel])
 			return value
-
+	
 	return Color(
 		float(value["r"]),
 		float(value["g"]),
@@ -253,7 +245,5 @@ func _validate_color(value: Variant, path: String) -> Variant:
 
 func _add_type_error(path: String, expected_type: int, value: Variant) -> void:
 	errors.append("%s: expected %s, received %s." % [
-		path,
-		type_string(expected_type),
-		type_string(typeof(value))
+		path, type_string(expected_type), type_string(typeof(value))
 	])
