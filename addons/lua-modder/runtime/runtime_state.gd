@@ -30,6 +30,7 @@ var _phase: int = Phase.CREATED
 var _lua_state: LuaState
 var _script_api: LuaTable
 var _game_api: LuaTable
+var _game_api_entries: Array[Dictionary] = []
 var _script_functions: Dictionary = {}
 var _lifecycle_handlers: Dictionary = {}
 var _execution_guard := LuaExecutionGuard.new()
@@ -165,14 +166,15 @@ func finish_setup() -> bool:
 	return true
 
 
-func activate(game_functions: Dictionary = {}) -> bool:
+
+func activate(game_functions: Dictionary = {}, api_registry: RuntimeApiRegistry = null) -> bool:
 	if _phase != Phase.PREPARED:
 		errors.append("Mod '%s' cannot activate before setup is complete." % mod_id)
 		return false
 	
 	for function_name in game_functions:
-		if typeof(function_name) != TYPE_STRING:
-			errors.append("Runtime API function names must be strings.")
+		if typeof(function_name) != TYPE_STRING or String(function_name).is_empty():
+			errors.append("Runtime API function names must be non-empty strings.")
 			return false
 	
 		var callback: Variant = game_functions[function_name]
@@ -180,11 +182,66 @@ func activate(game_functions: Dictionary = {}) -> bool:
 			errors.append("Invalid runtime API function '%s'." % function_name)
 			return false
 	
-	_game_api = _lua_state.create_table()
-	for function_name in game_functions:
-		_game_api[function_name] = _lua_state.create_function(game_functions[function_name])
+	var registered_functions: Dictionary[String, Callable] = {}
+	if api_registry != null:
+		if not api_registry.errors.is_empty():
+			errors.append("Runtime API registry contains registration errors: %s" % str(api_registry.errors))
+			return false
 	
-	_lua_state.globals["game"] = _game_api
+		registered_functions = api_registry.get_functions()
+		for full_path in registered_functions:
+			for function_name in game_functions:
+				if full_path == function_name or full_path.begins_with(String(function_name) + "."):
+					errors.append("Runtime API path '%s' conflicts with legacy function '%s'." % [
+						full_path, function_name
+					])
+					return false
+	
+	_game_api = _lua_state.create_table()
+	_game_api_entries.clear()
+	# Functions at 'game' namespace
+	for function_name in game_functions:
+		var lua_function := _lua_state.create_function(game_functions[function_name])
+		_game_api.rawset(function_name, lua_function)
+		_game_api_entries.append({
+			"parent": _game_api,
+			"key": function_name,
+			"expected": lua_function,
+			"path": function_name
+		})
+	
+	# Functions at custom namespaces. Could be 'game.{namespace}.{method}'
+	var tables: Dictionary[String, LuaTable] = {}
+	for full_path in registered_functions:
+		var segments := full_path.split(".")
+		var parent: LuaTable = _game_api
+		var _namespace := ""
+		for i in range(segments.size() - 1):
+			var segment := segments[i]
+			_namespace = segment if _namespace.is_empty() else _namespace + "." + segment
+			if not tables.has(_namespace):
+				var nested_table := _lua_state.create_table()
+				parent.rawset(segment, nested_table)
+				tables[_namespace] = nested_table
+				_game_api_entries.append({
+					"parent": parent,
+					"key": segment,
+					"expected": nested_table,
+					"path": _namespace
+				})
+			parent = tables[_namespace]
+	
+		var method_name := segments[segments.size() - 1]
+		var lua_function := _lua_state.create_function(registered_functions[full_path])
+		parent.rawset(method_name, lua_function)
+		_game_api_entries.append({
+			"parent": parent,
+			"key": method_name,
+			"expected": lua_function,
+			"path": full_path
+		})
+	
+	_lua_state.globals.rawset("game", _game_api)
 	_phase = Phase.ACTIVE
 	return true
 
@@ -242,8 +299,9 @@ func run_lifecycle(handler_name: String, data: Dictionary = {}) -> bool:
 		])
 	
 	_validate_script_api()
-	_validate_storage_api()
 	_validate_remote_api()
+	_validate_game_api_members()
+	_validate_storage_api()
 	
 	if is_load:
 		var storage_after := _storage_codec.capture(_lua_state, _storage)
@@ -287,6 +345,7 @@ func close() -> void:
 	_script_api = null
 	_remote_api = null
 	_storage = null
+	_game_api_entries.clear() # it needs to be BEDORE _game_api = null
 	_game_api = null
 	_lua_state = null
 	
@@ -657,8 +716,9 @@ func dispatch_event(event_name: String, data: Dictionary = {}) -> bool:
 		_lua_state.globals.rawset("game", _game_api)
 	
 	_validate_script_api()
-	_validate_storage_api()
 	_validate_remote_api()
+	_validate_game_api_members()
+	_validate_storage_api()
 	
 	var valid := success and errors.is_empty()
 	callback = null
@@ -732,19 +792,16 @@ func invoke_remote(interface_name: String, method_name: String, arguments: Array
 	
 	_validate_script_api()
 	_validate_remote_api()
+	_validate_game_api_members()
 	_validate_storage_api()
 	
 	var result: Variant = _execution_guard.last_result
 	var valid := success and errors.is_empty()
-	
 	callback = null
 	origin = null
-	
 	if not valid:
 		return {"ok": false, "error": str(errors)}
-	
 	return {"ok": true, "value": result}
-
 #endregion
 
 
@@ -913,4 +970,18 @@ func _serialize_remote_result(value: Variant) -> Variant:
 	var visited: Dictionary = {}
 	var counter: Array[int] = [0]
 	return _read_custom_event_value(value, 0, visited, counter)
+
+
+func _validate_game_api_members() -> bool:
+	for entry in _game_api_entries:
+		var parent: LuaTable = entry["parent"]
+		var key: String = entry["key"]
+		var expected: LuaObject = entry["expected"]
+		var full_path: String = entry["path"]
+		var current: Variant = parent.rawget(key)
+		if not _same_lua_object(current, expected):
+			errors.append("Mod '%s' replaced game.%s." % [mod_id, full_path])
+			return false
+	
+	return true
 #endregion
