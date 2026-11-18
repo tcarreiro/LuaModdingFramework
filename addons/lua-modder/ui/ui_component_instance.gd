@@ -6,6 +6,8 @@ var content_root: Control
 var component_id: String
 var values: Dictionary = {}
 var transition: UIStyleTransition
+var animation: UIAnimationPlayer
+var interaction: UIComponentInteraction
 
 var _registry: UIComponentRegistry
 var _trusted: bool = false
@@ -13,8 +15,8 @@ var _root_component: UIComponentInstance
 var _children: Array[UIComponentInstance] = []
 var _bindings: Dictionary = {}
 var _style_layout: Dictionary = {}
-var animation: UIAnimationPlayer
-var interaction: UIComponentInteraction
+var _named_children: Dictionary[String, UIComponentInstance] = {}
+var _event_forwarders: Array[Dictionary] = []
 
 func update(changes: Dictionary) -> bool:
 	return _registry != null and _registry.update_component(self, changes)
@@ -74,7 +76,19 @@ func call_hook(hook_name: StringName, arguments: Array = []) -> Variant:
 	return controller.call_hook(hook_name, arguments)
 
 
+
 func clear_callbacks() -> void:
+	for entry in _event_forwarders:
+		var child: UIComponentInstance = entry["child"]
+		child.off_event(entry["event"], entry["listener"])
+	_event_forwarders.clear()
+	
 	if interaction != null:
 		interaction.clear()
 		interaction = null
+	
+	if _root_component != null:
+		_root_component.clear_callbacks()
+	
+	for child in _children:
+		child.clear_callbacks()

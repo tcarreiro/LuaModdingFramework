@@ -11,7 +11,7 @@ func _init(content_types: ContentTypeRegistry) -> void:
 	_types = content_types
 
 
-func run(mods: Array[ModManifest], startup_settings: Dictionary = {}) -> ContentRegistry:
+func run(mods: Array[ModManifest], startup_settings: Dictionary = {}, ui_components: UIComponentRegistry = null) -> ContentRegistry:
 	errors.clear()
 	warnings.clear()
 	if mods.is_empty():
@@ -22,7 +22,7 @@ func run(mods: Array[ModManifest], startup_settings: Dictionary = {}) -> Content
 	var mod_versions: Dictionary = {}
 	for manifest in mods:
 		mod_versions[manifest.id] = manifest.version
-	var state := ContentState.new(_types)
+	var state := ContentState.new(_types, ui_components)
 	state.start(startup_settings, mod_versions)
 	if not _load_definitions(state, mods) \
 			or not _run_lua_round(state, mods, CONTENT_UPDATES_FILE_NAME) \
@@ -32,8 +32,10 @@ func run(mods: Array[ModManifest], startup_settings: Dictionary = {}) -> Content
 
 	var registry := state.finish()
 	errors.append_array(state.get_errors())
+	
 	if registry == null and errors.is_empty():
 		errors.append("Content Stage failed during finalization.")
+	
 	return registry
 
 

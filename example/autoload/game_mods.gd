@@ -92,6 +92,7 @@ func prepare_new_game(mod_ids: Array[String]) -> bool:
 	return true
 
 
+
 func run_content_stage() -> bool:
 	content_registry = null
 	content_errors.clear()
@@ -133,11 +134,38 @@ func run_content_stage() -> bool:
 
 		startup_settings[setting.id] = selected_settings[setting.id]
 
+	# Novo catálogo para este carregamento de mods.
+	# Estilos nativos preparados; componentes ainda abertos a registro.
+	var next_ui_catalog := PlaygroundUiCatalog.new()
+
+	if not next_ui_catalog.build(false):
+		content_errors.append_array(next_ui_catalog.errors)
+		return false
+
 	var loader := ContentLoader.new(content_types)
-	content_registry = loader.run(selected_mods, startup_settings)
+
+	var next_content_registry := loader.run(
+		selected_mods,
+		startup_settings,
+		next_ui_catalog.component_registry
+	)
 
 	content_errors.append_array(loader.errors)
-	return content_registry != null
+
+	if next_content_registry == null:
+		return false
+
+	# Os mods já registraram seus templates no Content Stage.
+	# Validamos todas as referências, permissões e rotas antes do Runtime.
+	if not next_ui_catalog.component_registry.finalize():
+		content_errors.append_array(next_ui_catalog.component_registry.errors)
+		return false
+
+	content_registry = next_content_registry
+	ui_catalog = next_ui_catalog
+
+	return true
+
 
 
 func _validate_loot(data: Dictionary) -> String:

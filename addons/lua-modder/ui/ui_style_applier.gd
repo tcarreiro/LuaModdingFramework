@@ -70,16 +70,26 @@ static func _apply_padding(box: StyleBox, value: Variant) -> void:
 static func _apply_layout(control: Control, layout: Dictionary) -> void:
 	if layout.has("min_size"):
 		control.custom_minimum_size = layout["min_size"]
-	
 	if layout.has("stretch_x"):
 		control.size_flags_horizontal = size_flags(layout["stretch_x"])
-	
 	if layout.has("stretch_y"):
 		control.size_flags_vertical = size_flags(layout["stretch_y"])
-	
 	if layout.has("stretch_ratio"):
 		control.size_flags_stretch_ratio = layout["stretch_ratio"]
-	
+	var scale_mode: String = layout.get("scale_mode", "transform")
+	if scale_mode == "visual_only":
+		control.offset_transform_enabled = true
+		control.offset_transform_visual_only = true
+		control.offset_transform_pivot_ratio = layout.get(
+			"pivot_ratio", Vector2(0.5, 0.5)
+		)
+		if layout.has("pivot_offset"):
+			control.offset_transform_pivot = layout["pivot_offset"]
+	else:
+		if layout.has("pivot_ratio"):
+			control.pivot_offset_ratio = layout["pivot_ratio"]
+		if layout.has("pivot_offset"):
+			control.pivot_offset = layout["pivot_offset"]
 	if control is BoxContainer:
 		_apply_flex_layout(control as BoxContainer, layout)
 

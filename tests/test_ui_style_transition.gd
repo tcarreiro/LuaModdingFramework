@@ -240,3 +240,69 @@ func test_disabled_property_changes_visual_state() -> void:
 	assert_eq(instance.transition.current_state, "normal")
 
 	instance.root.free()
+
+
+func test_visual_only_scale_uses_center_pivot() -> void:
+	var style := _animated_style()
+	style.layout["scale_mode"] = "visual_only"
+	style.layout["pivot_ratio"] = Vector2(0.5, 0.5)
+
+	assert_true(styles.register_style(style))
+	assert_true(styles.finalize())
+	_register_button()
+
+	var instance := components.instantiate_component("core:button")
+	assert_not_null(instance)
+
+	var button := instance.content_root as Button
+	button.size = Vector2(240, 48)
+
+	assert_true(button.offset_transform_enabled)
+	assert_true(button.offset_transform_visual_only)
+	assert_eq(button.offset_transform_pivot_ratio, Vector2(0.5, 0.5))
+
+	instance.transition.set_state("hover")
+
+	assert_eq(button.scale, Vector2.ONE)
+	assert_eq(button.offset_transform_scale, Vector2(1.1, 1.1))
+
+	# O pivot relativo acompanha o redimensionamento.
+	button.size = Vector2(320, 64)
+
+	assert_eq(button.offset_transform_pivot_ratio, Vector2(0.5, 0.5))
+	assert_eq(
+		button.size * button.offset_transform_pivot_ratio,
+		Vector2(160, 32)
+	)
+
+	instance.root.free()
+
+
+func test_visual_only_scale_supports_custom_pivot() -> void:
+	var style := _animated_style()
+
+	style.layout["scale_mode"] = "visual_only"
+	style.layout["pivot_ratio"] = Vector2(0.25, 0.75)
+	style.layout["pivot_offset"] = Vector2(8, -3)
+
+	assert_true(styles.register_style(style))
+	assert_true(styles.finalize())
+	_register_button()
+
+	var instance := components.instantiate_component("core:button")
+	assert_not_null(instance)
+
+	var button := instance.content_root as Button
+
+	assert_eq(button.offset_transform_pivot_ratio, Vector2(0.25, 0.75))
+	assert_eq(button.offset_transform_pivot, Vector2(8, -3))
+
+	instance.root.free()
+
+
+func test_invalid_scale_mode_is_rejected() -> void:
+	var style := _animated_style()
+	style.layout["scale_mode"] = "unknown"
+
+	assert_false(styles.register_style(style))
+	assert_false(styles.errors.is_empty())

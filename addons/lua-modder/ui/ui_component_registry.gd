@@ -50,22 +50,28 @@ func _register(definition: UIComponentDefinition) -> bool:
 	return true
 
 
+
 func finalize() -> bool:
 	if _finalized:
 		return true
+	
 	if not errors.is_empty():
 		return false
+	
 	for definition in _definitions.values():
 		if definition.kind == UIComponentDefinition.Kind.TEMPLATE:
 			if not _validate_tree(definition.template, definition):
 				return false
-			if not _validate_interaction_contract(definition):
-				return false
+		if not _validate_interaction_contract(definition):
+			return false
+	
 	for id in _definitions:
 		if not _validate_cycles(id, []):
 			return false
+	
 	_finalized = true
 	return true
+
 
 
 func is_finalized() -> bool:
@@ -127,14 +133,15 @@ func _instantiate(id: String, values: Dictionary, trusted: bool) -> UIComponentI
 		if instance.transition != null:
 			instance.transition.refresh()
 		return instance
-	instance._root_component = _build_tree(definition.template, instance)
+	instance._root_component = _build_tree(definition.template, instance, true)
 	if instance._root_component == null:
 		return null
 	instance.root = instance._root_component.root
 	return instance
 
 
-func _build_tree(node_data: Dictionary, owner: UIComponentInstance) -> UIComponentInstance:
+
+func _build_tree(node_data: Dictionary, owner: UIComponentInstance, is_root: bool = false) -> UIComponentInstance:
 	var id: String = node_data["component"]
 	var resolved: Dictionary = {}
 	var sources: Dictionary = {}
@@ -150,16 +157,26 @@ func _build_tree(node_data: Dictionary, owner: UIComponentInstance) -> UICompone
 			sources[name] = source
 		else:
 			resolved[name] = value
+	
 	var instance := _instantiate(id, resolved, owner._trusted)
 	if instance == null:
 		return null
+	
+	if not is_root and node_data.has("name"):
+		var local_name: String = node_data["name"]
+		owner._named_children[local_name] = instance
+	
 	for name in sources:
 		var source: String = sources[name]
 		if not owner._bindings.has(source):
 			owner._bindings[source] = []
-		owner._bindings[source].append({"target": instance, "property": name})
+		owner._bindings[source].append({
+			"target": instance,
+			"property": name
+		})
+	
 	for child_data in node_data.get("children", []):
-		var child := _build_tree(child_data, owner)
+		var child := _build_tree(child_data, owner, false)
 		if child == null:
 			instance.root.free()
 			return null
@@ -170,10 +187,12 @@ func _build_tree(node_data: Dictionary, owner: UIComponentInstance) -> UICompone
 			child.root.free()
 			instance.root.free()
 			return null
+	
 		slot.add_child(child.root)
 		UIStyleApplier.apply_cross_alignment(instance, child)
 		instance._children.append(child)
 	return instance
+
 
 
 func update_component(instance: UIComponentInstance, changes: Dictionary) -> bool:
@@ -387,9 +406,14 @@ func ensure_interaction(instance: UIComponentInstance) -> UIComponentInteraction
 	if definition == null:
 		errors.append("Unknown UI component '%s'." % instance.component_id)
 		return null
-	
 	instance.interaction = UIComponentInteraction.new()
-	instance.interaction.setup(definition, instance.content_root)
+	var target := instance.content_root if instance.content_root != null else instance.root
+	instance.interaction.setup(definition, target)
+	
+	if definition.kind == UIComponentDefinition.Kind.TEMPLATE:
+		if not _connect_template_routes(instance, definition):
+			instance.clear_callbacks()
+			return null
 	return instance.interaction
 
 
@@ -425,6 +449,40 @@ func _apply_instance_style(instance: UIComponentInstance) -> bool:
 	return true
 
 
+func _connect_template_routes(instance: UIComponentInstance, definition: UIComponentDefinition) -> bool:
+	for public_event in definition.event_routes:
+		var route: Dictionary = definition.event_routes[public_event]
+		var source_name: String = route["source"]
+		var source_event := StringName(route["event"])
+		var child: UIComponentInstance = instance._named_children.get(source_name)
+		if child == null:
+			errors.append("Unknown event source '%s' in '%s'." % [
+				source_name, definition.id
+			])
+			return false
+	
+		var listener := Callable(self, "_forward_template_event").bind(
+			instance,
+			StringName(public_event)
+		)
+		if not child.on_event(source_event, listener):
+			errors.append("Cannot connect event '%s' in '%s'." % [
+				public_event, definition.id
+			])
+			return false
+	
+		instance._event_forwarders.append({
+			"child": child,
+			"event": source_event,
+			"listener": listener
+		})
+	return true
+
+
+func _forward_template_event(event: Dictionary, owner: UIComponentInstance, public_event: StringName) -> void:
+	owner.emit_event(public_event, event.get("arguments", []))
+
+
 func clear() -> void:
 	_definitions.clear()
 	_finalized = false
@@ -448,12 +506,21 @@ func _validate_interaction_contract(definition: UIComponentDefinition) -> bool:
 				or typeof(source.get("signal")) not in [TYPE_STRING, TYPE_STRING_NAME]:
 			errors.append("Invalid event source '%s' in '%s'." % [event_name, definition.id])
 			return false
+	
+	if definition.kind == UIComponentDefinition.Kind.TEMPLATE:
+		if not _validate_template_routes(definition):
+			return false
+	elif not definition.event_routes.is_empty():
+		errors.append("Scene components cannot declare template event routes.")
+		return false
+	
 	for hook_name in definition.hooks:
 		var schema: Variant = definition.hooks[hook_name]
 		if typeof(schema) == TYPE_INT:
 			if schema < TYPE_NIL or schema >= TYPE_MAX:
 				return _invalid_hook_contract(definition.id, hook_name)
 			continue
+	
 		if not schema is Dictionary:
 			return _invalid_hook_contract(definition.id, hook_name)
 	
@@ -467,6 +534,7 @@ func _validate_interaction_contract(definition: UIComponentDefinition) -> bool:
 		if schema.has("args"):
 			if not schema["args"] is Array:
 				return _invalid_hook_contract(definition.id, hook_name)
+	
 			for argument_type in schema["args"]:
 				if typeof(argument_type) != TYPE_INT or argument_type < TYPE_NIL or argument_type >= TYPE_MAX:
 					return _invalid_hook_contract(definition.id, hook_name)
@@ -481,3 +549,53 @@ func _valid_hook_type(value: Variant, expected: int) -> bool:
 func _invalid_hook_contract(component_id: String, hook_name: StringName) -> bool:
 	errors.append("Invalid hook contract '%s.%s'." % [component_id, hook_name])
 	return false
+
+
+func _validate_template_routes(definition: UIComponentDefinition) -> bool:
+	var named: Dictionary = {}
+	if not _collect_named_children(definition.template, named, true):
+		return false
+	
+	for public_event in definition.event_routes:
+		if not definition.events.has(StringName(public_event)):
+			errors.append("Undeclared template event '%s'." % public_event)
+			return false
+	
+		var route: Variant = definition.event_routes[public_event]
+		if not route is Dictionary:
+			errors.append("Invalid template event route '%s'." % public_event)
+			return false
+	
+		var source_name: Variant = route.get("source")
+		var source_event: Variant = route.get("event")
+		if typeof(source_name) != TYPE_STRING or typeof(source_event) != TYPE_STRING:
+			errors.append("Invalid event route '%s'." % public_event)
+			return false
+	
+		if not named.has(source_name):
+			errors.append("Unknown named child '%s' in '%s'." % [
+				source_name, definition.id
+			])
+			return false
+	
+		var child_id: String = named[source_name]
+		var child_definition := _definitions[child_id]
+		if not child_definition.events.has(StringName(source_event)):
+			errors.append("Component '%s' does not declare event '%s'." % [
+				child_id, source_event
+			])
+			return false
+	return true
+
+
+func _collect_named_children(node: Dictionary, named: Dictionary, is_root: bool = false) -> bool:
+	if not is_root and node.has("name"):
+		var local_name: String = node["name"]
+		if local_name.is_empty() or named.has(local_name):
+			errors.append("Invalid or duplicate UI child name '%s'." % local_name)
+			return false
+		named[local_name] = node["component"]
+	for child in node.get("children", []):
+		if not _collect_named_children(child, named, false):
+			return false
+	return true

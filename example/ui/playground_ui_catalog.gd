@@ -4,8 +4,10 @@ var errors: Array[String] = []
 var style_registry: UIStyleRegistry
 var component_registry: UIComponentRegistry
 
-func build() -> bool:
+
+func build(finalize_components: bool = true) -> bool:
 	errors.clear()
+
 	style_registry = UIStyleRegistry.new()
 	component_registry = UIComponentRegistry.new()
 	component_registry.style_registry = style_registry
@@ -13,11 +15,12 @@ func build() -> bool:
 	if not style_registry.register_style(_create_button_style()):
 		errors.append_array(style_registry.errors)
 		return false
+
 	if not style_registry.finalize():
 		errors.append_array(style_registry.errors)
 		return false
 
-	var definition := UIComponentDefinition.from_scene(
+	var button_definition := UIComponentDefinition.from_scene(
 		"core:playground-button",
 		_create_button_scene(),
 		Callable(self, "_apply_button"),
@@ -27,19 +30,45 @@ func build() -> bool:
 			"style": {"type": TYPE_STRING, "default": "core:playground-button", "mod_editable": false}
 		}
 	)
-	definition.events = [&"pressed"]
-	definition.event_sources = {
+
+	button_definition.events = [&"pressed"]
+	button_definition.event_sources = {
 		&"pressed": {"path": NodePath("."), "signal": &"pressed"}
 	}
 
-	if not component_registry.register_scene(definition):
+	var column_definition := UIComponentDefinition.from_scene(
+		"core:playground-column",
+		_create_column_scene(),
+		Callable(self, "_apply_noop")
+	)
+
+	var label_definition := UIComponentDefinition.from_scene(
+		"core:playground-label",
+		_create_label_scene(),
+		Callable(self, "_apply_label"),
+		{
+			"text": {"type": TYPE_STRING, "default": "", "mod_editable": true}
+		}
+	)
+
+	if not component_registry.register_scene(button_definition):
 		errors.append_array(component_registry.errors)
 		return false
-	if not component_registry.finalize():
+
+	if not component_registry.register_scene(column_definition):
+		errors.append_array(component_registry.errors)
+		return false
+
+	if not component_registry.register_scene(label_definition):
+		errors.append_array(component_registry.errors)
+		return false
+
+	if finalize_components and not component_registry.finalize():
 		errors.append_array(component_registry.errors)
 		return false
 
 	return true
+
 
 
 func _create_button_scene() -> PackedScene:
@@ -80,7 +109,11 @@ func _create_button_style() -> UIStyleDefinition:
 	style.layout = {
 		"min_size": Vector2(240, 48),
 		"padding": Vector4(14, 9, 14, 9),
-		"stretch_x": "expand_fill"
+		"stretch_x": "expand_fill",
+		# Escala aplicada à aparência, sem alterar a área de clique.
+		"scale_mode": "visual_only",
+		# O centro acompanha automaticamente o tamanho do botão.
+		"pivot_ratio": Vector2(0.5, 0.5)
 	}
 	style.states = {
 		"normal": {"scale": Vector2.ONE},
@@ -125,3 +158,45 @@ func _apply_button(control: Control, values: Dictionary) -> void:
 		button.text = values["label"]
 	if values.has("disabled"):
 		button.disabled = values["disabled"]
+
+
+func _create_column_scene() -> PackedScene:
+	var column := VBoxContainer.new()
+	column.name = "ModColumn"
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.add_theme_constant_override("separation", 8)
+
+	var scene := PackedScene.new()
+	var result := scene.pack(column)
+	column.free()
+
+	if result != OK:
+		errors.append("Cannot create native column scene: %s" % error_string(result))
+
+	return scene
+
+
+func _create_label_scene() -> PackedScene:
+	var label := Label.new()
+	label.name = "ModLabel"
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+	var scene := PackedScene.new()
+	var result := scene.pack(label)
+	label.free()
+
+	if result != OK:
+		errors.append("Cannot create native label scene: %s" % error_string(result))
+
+	return scene
+
+
+func _apply_label(control: Control, values: Dictionary) -> void:
+	if values.has("text"):
+		(control as Label).text = values["text"]
+
+
+func _apply_noop(_control: Control, _values: Dictionary) -> void:
+	pass

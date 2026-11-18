@@ -1,6 +1,6 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://jhcduo8tv7p6"]
 
-[ext_resource type="Script" path="res://example/scenes/runtime_playground.gd" id="1_script"]
+[ext_resource type="Script" uid="uid://b4uhnrkjut8ew" path="res://example/scenes/runtime_playground.gd" id="1_script"]
 
 [sub_resource type="StyleBoxFlat" id="Card"]
 bg_color = Color(0.083, 0.111, 0.156, 1)
@@ -14,7 +14,7 @@ corner_radius_top_right = 12
 corner_radius_bottom_right = 12
 corner_radius_bottom_left = 12
 
-[node name="RuntimePlayground" type="Control"]
+[node name="RuntimePlayground" type="Control" unique_id=1404073502]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -23,17 +23,17 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_script")
 
-[node name="Background" type="ColorRect" parent="."]
+[node name="Background" type="ColorRect" parent="." unique_id=1399418794]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.037, 0.051, 0.077, 1)
 mouse_filter = 2
+color = Color(0.037, 0.051, 0.077, 1)
 
-[node name="OuterMargin" type="MarginContainer" parent="."]
+[node name="OuterMargin" type="MarginContainer" parent="." unique_id=2062838642]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -45,133 +45,159 @@ theme_override_constants/margin_top = 24
 theme_override_constants/margin_right = 30
 theme_override_constants/margin_bottom = 24
 
-[node name="Body" type="VBoxContainer" parent="OuterMargin"]
+[node name="Body" type="VBoxContainer" parent="OuterMargin" unique_id=1925552973]
 layout_mode = 2
 theme_override_constants/separation = 15
 
-[node name="Eyebrow" type="Label" parent="OuterMargin/Body"]
+[node name="Eyebrow" type="Label" parent="OuterMargin/Body" unique_id=2010696235]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.45, 0.74, 0.86, 1)
 text = "PLAYGROUND  /  RUNTIME & LUA UI"
 
-[node name="Title" type="Label" parent="OuterMargin/Body"]
+[node name="Title" type="Label" parent="OuterMargin/Body" unique_id=517105872]
 layout_mode = 2
 theme_override_font_sizes/font_size = 28
 text = "Jogo em execução"
 
-[node name="Meta" type="HBoxContainer" parent="OuterMargin/Body"]
+[node name="Meta" type="HBoxContainer" parent="OuterMargin/Body" unique_id=341306795]
 layout_mode = 2
 theme_override_constants/separation = 24
 
-[node name="ActiveMods" type="Label" parent="OuterMargin/Body/Meta"]
+[node name="ActiveMods" type="Label" parent="OuterMargin/Body/Meta" unique_id=641888686]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.65, 0.76, 0.87, 1)
 text = "Mods:"
 
-[node name="TemplateCount" type="Label" parent="OuterMargin/Body/Meta"]
+[node name="TemplateCount" type="Label" parent="OuterMargin/Body/Meta" unique_id=1249397202]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.65, 0.76, 0.87, 1)
 text = "Templates:"
 
-[node name="WorkArea" type="HBoxContainer" parent="OuterMargin/Body"]
+[node name="WorkArea" type="BoxContainer" parent="OuterMargin/Body" unique_id=1061171833]
+unique_name_in_owner = true
 layout_mode = 2
+size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 16
 
-[node name="ModPanel" type="PanelContainer" parent="OuterMargin/Body/WorkArea"]
-custom_minimum_size = Vector2(380, 280)
+[node name="ModPanel" type="PanelContainer" parent="OuterMargin/Body/WorkArea" unique_id=1448381791]
 layout_mode = 2
 size_flags_horizontal = 3
+size_flags_vertical = 3
 theme_override_styles/panel = SubResource("Card")
 
-[node name="ModMargin" type="MarginContainer" parent="OuterMargin/Body/WorkArea/ModPanel"]
+[node name="ModMargin" type="MarginContainer" parent="OuterMargin/Body/WorkArea/ModPanel" unique_id=1752504729]
 layout_mode = 2
 theme_override_constants/margin_left = 22
 theme_override_constants/margin_top = 22
 theme_override_constants/margin_right = 22
 theme_override_constants/margin_bottom = 22
 
-[node name="ModContent" type="VBoxContainer" parent="OuterMargin/Body/WorkArea/ModPanel/ModMargin"]
+[node name="ModContent" type="VBoxContainer" parent="OuterMargin/Body/WorkArea/ModPanel/ModMargin" unique_id=2104190255]
 layout_mode = 2
+size_flags_vertical = 3
 theme_override_constants/separation = 16
 
-[node name="ModTitle" type="Label" parent="OuterMargin/Body/WorkArea/ModPanel/ModMargin/ModContent"]
+[node name="ModTitle" type="Label" parent="OuterMargin/Body/WorkArea/ModPanel/ModMargin/ModContent" unique_id=2097441164]
 layout_mode = 2
 theme_override_font_sizes/font_size = 21
 text = "Interfaces criadas pelos mods"
 
-[node name="ModDescription" type="Label" parent="OuterMargin/Body/WorkArea/ModPanel/ModMargin/ModContent"]
+[node name="ModDescription" type="Label" parent="OuterMargin/Body/WorkArea/ModPanel/ModMargin/ModContent" unique_id=2072458010]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.6, 0.71, 0.8, 1)
-autowrap_mode = 3
 text = "Botões abaixo foram instanciados por game.ui.open() dentro do Lua."
+autowrap_mode = 3
 
-[node name="ModUIRoot" type="VBoxContainer" parent="OuterMargin/Body/WorkArea/ModPanel/ModMargin/ModContent"]
+[node name="ModScroll" type="ScrollContainer" parent="OuterMargin/Body/WorkArea/ModPanel/ModMargin/ModContent" unique_id=350493408]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+follow_focus = true
+horizontal_scroll_mode = 0
+
+[node name="ModScrollPadding" type="MarginContainer" parent="OuterMargin/Body/WorkArea/ModPanel/ModMargin/ModContent/ModScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="ModUIRoot" type="VBoxContainer" parent="OuterMargin/Body/WorkArea/ModPanel/ModMargin/ModContent/ModScroll/ModScrollPadding"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 22
 
-[node name="LogPanel" type="PanelContainer" parent="OuterMargin/Body/WorkArea"]
-custom_minimum_size = Vector2(440, 280)
+[node name="LogPanel" type="PanelContainer" parent="OuterMargin/Body/WorkArea" unique_id=143123866]
 layout_mode = 2
 size_flags_horizontal = 3
+size_flags_vertical = 3
 theme_override_styles/panel = SubResource("Card")
 
-[node name="LogMargin" type="MarginContainer" parent="OuterMargin/Body/WorkArea/LogPanel"]
+[node name="LogMargin" type="MarginContainer" parent="OuterMargin/Body/WorkArea/LogPanel" unique_id=606152541]
 layout_mode = 2
 theme_override_constants/margin_left = 20
 theme_override_constants/margin_top = 22
 theme_override_constants/margin_right = 20
 theme_override_constants/margin_bottom = 22
 
-[node name="LogBody" type="VBoxContainer" parent="OuterMargin/Body/WorkArea/LogPanel/LogMargin"]
+[node name="LogBody" type="VBoxContainer" parent="OuterMargin/Body/WorkArea/LogPanel/LogMargin" unique_id=8774237]
 layout_mode = 2
+size_flags_vertical = 3
 theme_override_constants/separation = 10
 
-[node name="LogTitle" type="Label" parent="OuterMargin/Body/WorkArea/LogPanel/LogMargin/LogBody"]
+[node name="LogTitle" type="Label" parent="OuterMargin/Body/WorkArea/LogPanel/LogMargin/LogBody" unique_id=94900217]
 layout_mode = 2
 theme_override_font_sizes/font_size = 21
 text = "Log do Runtime"
 
-[node name="LogOutput" type="RichTextLabel" parent="OuterMargin/Body/WorkArea/LogPanel/LogMargin/LogBody"]
+[node name="LogOutput" type="RichTextLabel" parent="OuterMargin/Body/WorkArea/LogPanel/LogMargin/LogBody" unique_id=1499024280]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_horizontal = 3
 size_flags_vertical = 3
+focus_mode = 2
 scroll_following = true
 selection_enabled = true
 
-[node name="StatusLabel" type="Label" parent="OuterMargin/Body"]
+[node name="StatusLabel" type="Label" parent="OuterMargin/Body" unique_id=287439555]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
 theme_override_colors/font_color = Color(0.62, 0.82, 0.89, 1)
 autowrap_mode = 3
 
-[node name="Actions" type="HBoxContainer" parent="OuterMargin/Body"]
+[node name="Actions" type="BoxContainer" parent="OuterMargin/Body" unique_id=43236887]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="MenuButton" type="Button" parent="OuterMargin/Body/Actions"]
+[node name="MenuButton" type="Button" parent="OuterMargin/Body/Actions" unique_id=2131437349]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(146, 45)
 layout_mode = 2
+size_flags_horizontal = 3
 text = "Menu principal"
 
-[node name="ActionSpacer" type="Control" parent="OuterMargin/Body/Actions"]
+[node name="ActionSpacer" type="Control" parent="OuterMargin/Body/Actions" unique_id=1354637244]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="TickButton" type="Button" parent="OuterMargin/Body/Actions"]
+[node name="TickButton" type="Button" parent="OuterMargin/Body/Actions" unique_id=1479808123]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(150, 45)
 layout_mode = 2
+size_flags_horizontal = 3
 text = "Avançar tick"
 
-[node name="ReloadButton" type="Button" parent="OuterMargin/Body/Actions"]
+[node name="ReloadButton" type="Button" parent="OuterMargin/Body/Actions" unique_id=159383511]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(190, 45)
 layout_mode = 2
+size_flags_horizontal = 3
 text = "Salvar e restaurar"

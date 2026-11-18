@@ -40,16 +40,13 @@ var _font_active := false
 func setup(target: Control, prepared_style: UIStyleDefinition) -> void:
 	control = target
 	style = prepared_style
-
-	_base_scale = control.scale
+	_base_scale = _read_scale()
 	_base_opacity = control.modulate.a
-
 	_remember_theme()
 	_connect_signals()
-
 	current_state = _detect_state()
 	_apply_scalar_values(_target_values(current_state), [])
-	
+
 
 func is_animating() -> bool:
 	return _tween != null and _tween.is_running()
@@ -133,28 +130,27 @@ func _start_tween(duration: float, config: Dictionary) -> void:
 	_tween.finished.connect(_on_finished.bind(generation))
 
 
+
 func _apply_progress(weight: float) -> void:
 	if control == null or not is_instance_valid(control):
 		return
-
 	for property_name in _from:
 		var start: Variant = _from[property_name]
 		var finish: Variant = _to[property_name]
-
 		match property_name:
 			"background_color":
-				_set_background(_live_box, (start as Color).lerp(finish, weight))
-
+				var color := start as Color
+				_set_background(_live_box, color.lerp(finish, weight))
 			"font_color":
-				_apply_live_font((start as Color).lerp(finish, weight))
-
+				var color := start as Color
+				_apply_live_font(color.lerp(finish, weight))
 			"opacity":
 				var color := control.modulate
 				color.a = lerpf(float(start), float(finish), weight)
 				control.modulate = color
-
 			"scale":
-				control.scale = (start as Vector2).lerp(finish, weight)
+				var scale := start as Vector2
+				_write_scale(scale.lerp(finish, weight))
 
 
 func _on_finished(generation: int) -> void:
@@ -228,16 +224,16 @@ func _target_values(state_name: String) -> Dictionary:
 func _current_values(state_name: String) -> Dictionary:
 	var result := {
 		"opacity": control.modulate.a,
-		"scale": control.scale,
-		"font_color": _live_font if _font_active else _font_palette.get(FONT_BY_STATE[state_name], Color.WHITE)
+		"scale": _read_scale(),
+		"font_color": _live_font if _font_active else _font_palette.get(
+			FONT_BY_STATE[state_name], Color.WHITE
+		)
 	}
-
 	var box := _live_box if _live_box != null else _box_for_state(state_name)
 	if box != null:
 		var background := _background(box)
 		if background != null:
 			result["background_color"] = background
-
 	return result
 
 
@@ -246,10 +242,8 @@ func _apply_scalar_values(values: Dictionary, excluded: Array) -> void:
 		var color := control.modulate
 		color.a = float(values["opacity"])
 		control.modulate = color
-
 	if "scale" not in excluded:
-		control.scale = values["scale"]
-
+		_write_scale(values["scale"])
 #endregion
 
 
@@ -335,7 +329,6 @@ func _apply_live_font(color: Color) -> void:
 
 
 #region Theme preservation
-
 func _remember_theme() -> void:
 	for name in _box_names():
 		_original_boxes[name] = control.get_theme_stylebox(name) \
@@ -347,6 +340,26 @@ func _remember_theme() -> void:
 		_original_font_overrides[name] = control.get_theme_color(name) \
 			if control.has_theme_color_override(name) else null
 		_font_palette[name] = control.get_theme_color(name)
+
+
+func _uses_visual_scale() -> bool:
+	return style != null and style.layout.get(
+		"scale_mode", "transform"
+	) == "visual_only"
+
+
+func _read_scale() -> Vector2:
+	if _uses_visual_scale():
+		return control.offset_transform_scale
+
+	return control.scale
+
+
+func _write_scale(value: Vector2) -> void:
+	if _uses_visual_scale():
+		control.offset_transform_scale = value
+	else:
+		control.scale = value
 
 
 func _restore_theme() -> void:
@@ -371,12 +384,10 @@ func _restore_theme() -> void:
 				control.add_theme_color_override(StringName(name), original)
 
 		_font_active = false
-
 #endregion
 
 
 #region Signals
-
 func _connect_signals() -> void:
 	control.mouse_entered.connect(refresh)
 	control.mouse_exited.connect(refresh)
@@ -392,5 +403,4 @@ func _connect_signals() -> void:
 
 func _on_toggled(_value: bool) -> void:
 	refresh()
-
 #endregion

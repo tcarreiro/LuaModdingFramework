@@ -4,9 +4,15 @@ var _types: ContentTypeRegistry
 var _registry: ContentRegistry
 var _content_api: LuaTable
 var _extend_function: LuaFunction
+var _ui_registry: UIComponentRegistry
+var _ui_registration: UIContentRegistration
+var _ui_api: LuaTable
+var _ui_define_function: LuaFunction
 
-func _init(content_types: ContentTypeRegistry) -> void:
+func _init(content_types: ContentTypeRegistry, ui_components: UIComponentRegistry = null) -> void:
 	_types = content_types
+	_ui_registry = ui_components
+
 
 
 func start(startup_settings: Dictionary = {}, mod_versions: Dictionary = {}) -> void:
@@ -28,9 +34,15 @@ func start(startup_settings: Dictionary = {}, mod_versions: Dictionary = {}) -> 
 
 	_content_api["raw"] = _raw
 	_content_api["extend"] = _extend_function
-
 	_lua_state.globals["Content"] = _content_api
-	
+
+	if _ui_registry != null:
+		_ui_registration = UIContentRegistration.new(_ui_registry, _lua_state)
+		_ui_api = _lua_state.create_table()
+		_ui_define_function = _lua_state.create_function(_lua_define_component)
+		_ui_api["define_component"] = _ui_define_function
+		_lua_state.globals["UI"] = _ui_api
+
 	var startup: Dictionary = {}
 
 	for setting_id in startup_settings:
@@ -42,6 +54,7 @@ func start(startup_settings: Dictionary = {}, mod_versions: Dictionary = {}) -> 
 	_lua_state.globals["settings"] = LuaUtils.to_lua_value(_lua_state, {
 		"startup": startup
 	})
+
 
 
 func is_active() -> bool:
@@ -111,6 +124,7 @@ func finish() -> ContentRegistry:
 	return result
 
 
+
 func _validate_content_api(mod_id: String) -> bool:
 	var current_content: Variant = _lua_state.globals.rawget("Content")
 	if not current_content is LuaTable:
@@ -131,6 +145,16 @@ func _validate_content_api(mod_id: String) -> bool:
 		errors.append("Mod '%s' replaced Content.extend." % mod_id)
 		return false
 	
+	if _ui_registry != null:
+		var current_ui: Variant = _lua_state.globals.rawget("UI")
+		if not LuaUtils.same_lua_object(_lua_state, current_ui, _ui_api):
+			errors.append("Mod '%s' replaced the UI API table." % mod_id)
+			return false
+	
+		var current_define: Variant = current_ui.rawget("define_component")
+		if not LuaUtils.same_lua_object(_lua_state, current_define, _ui_define_function):
+			errors.append("Mod '%s' replaced UI.define_component." % mod_id)
+			return false
 	return true
 
 
@@ -260,6 +284,16 @@ func _lua_extend(templates: Variant) -> bool:
 	return true
 
 
+func _lua_define_component(component_id: Variant, descriptor: Variant) -> bool:
+	if _ui_registration == null:
+		errors.append("UI component registration is unavailable.")
+		return false
+	if not _ui_registration.register(_current_mod_id, component_id, descriptor):
+		errors.append_array(_ui_registration.errors)
+		return false
+	return true
+
+
 func _read_extend_batch(templates: LuaTable, lua_templates: Array[LuaTable]) -> Array:
 	var source: Dictionary = templates.to_dictionary()
 	var batch: Array = []
@@ -380,10 +414,16 @@ func _read_lua_generic(value: Variant, depth: int) -> Variant:
 	return _read_lua_map(value, "", depth + 1)
 
 
+
 func close() -> void:
 	if is_active():
 		_lua_state.globals.rawset("Content", null)
-	
+		if _ui_api != null:
+			_lua_state.globals.rawset("UI", null)
+
+	_ui_registration = null
+	_ui_api = null
+	_ui_define_function = null
 	_content_api = null
 	_extend_function = null
 	_raw = null

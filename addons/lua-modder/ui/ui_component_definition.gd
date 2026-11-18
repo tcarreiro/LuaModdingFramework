@@ -14,6 +14,7 @@ var apply_properties: Callable
 var events: Array[StringName] = []
 var hooks: Dictionary = {}
 var event_sources: Dictionary = {}
+var event_routes: Dictionary = {}
 var drag_target: NodePath
 var drag_handle: NodePath
 var exposed_to_mods: bool = true
@@ -64,6 +65,7 @@ func copy() -> UIComponentDefinition:
 	result.events = events.duplicate()
 	result.hooks = hooks.duplicate(true)
 	result.event_sources = event_sources.duplicate(true)
+	result.event_routes = event_routes.duplicate(true)
 	result.drag_target = drag_target
 	result.drag_handle = drag_handle
 	result.exposed_to_mods = exposed_to_mods

@@ -187,7 +187,6 @@ func _valid_entry(group_name: String, name: String, value: Variant) -> bool:
 			return typeof(value) == TYPE_INT and value > 0
 		"fonts":
 			return value is Font
-
 	return false
 
 
@@ -214,7 +213,15 @@ func _valid_layout(name: String, value: Variant) -> bool:
 			return value is String and value in ["fill", "start", "center", "end"]
 		"gap":
 			return typeof(value) == TYPE_INT and value >= 0
-
+		"scale_mode":
+			return value is String and value in [
+				"transform", "visual_only"
+			]
+		"pivot_ratio", "pivot_offset":
+			if not value is Vector2:
+				return false
+			var pivot: Vector2 = value
+			return is_finite(pivot.x) and is_finite(pivot.y)
 	return false
 
 
