@@ -1,4 +1,4 @@
-extends MarginContainer
+extends Control
 
 @onready var active_mods: Label = %ActiveMods
 @onready var settings_list: VBoxContainer = %SettingsList
@@ -6,26 +6,22 @@ extends MarginContainer
 @onready var reset_button: Button = %ResetButton
 @onready var confirm_button: Button = %ConfirmButton
 @onready var feedback: Label = %Feedback
-@onready var action_buttons: HBoxContainer = %Actions
 
 var _inputs: Dictionary[String, Control] = {}
-var _runtime_tick_button: Button
-var _runtime_reload_button: Button
+
 
 func _ready() -> void:
 	back_button.pressed.connect(_on_back_pressed)
 	reset_button.pressed.connect(_on_reset_pressed)
 	confirm_button.pressed.connect(_on_confirm_pressed)
-
 	_build_settings()
-	_setup_runtime_buttons()
 
 
 func _build_settings() -> void:
 	var registry = GameMods.settings_registry
 
 	if registry == null:
-		feedback.text = "No settings registry available."
+		feedback.text = "Registro de configurações indisponível."
 		confirm_button.disabled = true
 		return
 
@@ -179,151 +175,51 @@ func _set_input_value(input: Control, value: Variant) -> void:
 
 
 func _on_reset_pressed() -> void:
+	if GameMods.settings_registry == null:
+		return
 	for setting in GameMods.settings_registry.get_visible_settings():
 		if _inputs.has(setting.id):
 			_set_input_value(_inputs[setting.id], setting.default_value)
-
 	feedback.text = "Valores padrão restaurados."
 
 
 func _on_back_pressed() -> void:
-	GameMods.stop_runtime()
 	get_tree().change_scene_to_file("res://example/scenes/mod_selection.tscn")
 
 
 func _on_confirm_pressed() -> void:
-	var registry = GameMods.settings_registry
-	var selected_values: Dictionary[String, Variant] = {}
+	var registry := GameMods.settings_registry
+	if registry == null:
+		feedback.text = "Registro de configurações indisponível."
+		return
 
+	var selected_values: Dictionary[String, Variant] = {}
 	for setting in registry.get_all_settings():
 		var value: Variant = setting.get_effective_value()
-
 		if not setting.hidden:
-			var input = _inputs.get(setting.id)
+			var input: Control = _inputs.get(setting.id)
 			if input == null:
-				feedback.text = "Missing input for '%s'." % setting.id
+				feedback.text = "Input ausente: %s" % setting.id
 				return
-
 			value = _read_value(setting, input)
-
 			if value == null:
-				feedback.text = "Invalid value for '%s'." % setting.display_name
+				feedback.text = "Valor inválido: %s" % setting.display_name
 				input.grab_focus()
 				return
-
-			var error = registry.validate_player_value(setting.id, value)
-			if not error.is_empty():
-				feedback.text = "Invalid value for '%s': %s" % [setting.display_name, error]
+			var validation_error: String = registry.validate_player_value(setting.id, value)
+			if not validation_error.is_empty():
+				feedback.text = "Valor inválido em '%s': %s" % [setting.display_name, validation_error]
 				input.grab_focus()
 				return
-
 		selected_values[setting.id] = value
 
 	GameMods.selected_settings = selected_values
-	
 	if not GameMods.run_content_stage():
-		GameMods.stop_runtime()
-		feedback.text = "Erro ao carregar o Content Stage. Consulte o Output."
+		feedback.text = "Erro no Content Stage:\n%s" % "\n".join(PackedStringArray(GameMods.content_errors))
 		for error in GameMods.content_errors:
 			push_error("[ContentStage] %s" % error)
 		return
-	
-	if not GameMods.start_new_runtime():
-		_show_runtime_errors()
-		return
-	_runtime_tick_button.disabled = false
-	_runtime_reload_button.disabled = false
 
-	var catalog = GameMods.content_registry.get_catalog()
-	var template_count := 0
-
-	for type_id in catalog:
-		var templates: Dictionary = catalog[type_id]
-		template_count += templates.size()
-
-	_show_runtime_feedback("Configurações confirmadas! %d Templates carregados. Runtime ativo." % template_count)
-
-	print("\n[ContentStage] Finalized catalog:")
-
-	for type_id in catalog:
-		print("Type: %s" % type_id)
-
-		var templates: Dictionary = catalog[type_id]
-
-		for template_id in templates:
-			var template: Dictionary = templates[template_id]
-			var metadata = GameMods.content_registry.get_metadata(type_id, template_id)
-
-			print("  - %s: %s" % [template_id, str(template)])
-			print("    Owner: %s | Last modified by: %s" % [
-				metadata["owner_mod_id"],
-				metadata["last_modified_by"]
-			])
-	
-	print("\n[ContentStage] Loot family:")
-
-	var content_registry = GameMods.content_registry
-	
-	var loot_family = content_registry.get_templates_in_family("loot")
-
-	for template_id in loot_family:
-		var template: Dictionary = loot_family[template_id]
-		print("  - %s [%s]" % [template_id, template["type"]])
-
-	print("\n[ContentStage] Exact loot bucket:")
-	print(content_registry.get_templates("loot").keys())
-
-	print("\n[ContentStage] Polymorphic lookup:")
-	print(content_registry.get_template_in_family("loot", "training_gauntlet"))
-
-
-func _setup_runtime_buttons() -> void:
-	_runtime_tick_button = Button.new()
-	_runtime_tick_button.text = "Avançar tick"
-	_runtime_tick_button.disabled = true
-	_runtime_tick_button.pressed.connect(_on_runtime_tick_pressed)
-	action_buttons.add_child(_runtime_tick_button)
-
-	_runtime_reload_button = Button.new()
-	_runtime_reload_button.text = "Salvar e restaurar"
-	_runtime_reload_button.disabled = true
-	_runtime_reload_button.pressed.connect(_on_runtime_reload_pressed)
-	action_buttons.add_child(_runtime_reload_button)
-
-
-func _on_runtime_tick_pressed() -> void:
-	if not GameMods.advance_tick():
-		_show_runtime_errors()
-		return
-
-	_show_runtime_feedback("Evento on_tick emitido: %d" % GameMods.world_time)
-
-
-func _on_runtime_reload_pressed() -> void:
-	if not GameMods.save_and_restore_runtime():
-		_show_runtime_errors()
-		return
-
-	_show_runtime_feedback("Runtime restaurado. Continue avançando os ticks.")
-
-
-func _show_runtime_feedback(message: String) -> void:
-	feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	feedback.text = message
-
-	var log_size := GameMods.runtime_log.size()
-	var first := maxi(0, log_size - 6)
-
-	for i in range(first, log_size):
-		feedback.text += "\n" + GameMods.runtime_log[i]
-
-
-func _show_runtime_errors() -> void:
-	feedback.text = "Runtime Stage falhou:\n%s" % "\n".join(PackedStringArray(GameMods.runtime_errors))
-
-	for error in GameMods.runtime_errors:
-		push_error("[RuntimeStage] %s" % error)
-
-	var active := GameMods.is_runtime_active()
-	_runtime_tick_button.disabled = not active
-	_runtime_reload_button.disabled = not active
+	# A cena de runtime tem seu próprio mount de UI e inicia o RuntimeStage
+	# no _ready. Portanto, não ativamos os mods nesta tela.
+	get_tree().change_scene_to_file("res://example/scenes/runtime_playground.tscn")

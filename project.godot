@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="LuaModdingFramework"
-run/main_scene="uid://dief3hlipyimu"
+run/main_scene="res://example/scenes/main_menu.tscn"
 config/features=PackedStringArray("4.8", "Forward Plus")
 
 [autoload]

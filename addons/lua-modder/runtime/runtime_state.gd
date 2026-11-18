@@ -45,7 +45,10 @@ var _remote_coroutines: Dictionary = {}
 var _remote_native_call: LuaFunction
 var _remote_call_sink: Callable
 var _remote_has_sink: Callable
-
+var _ui_callbacks: Dictionary[int, LuaFunction] = {}
+var _ui_coroutines: Dictionary[int, LuaCoroutine] = {}
+var _ui_pending_release: Array[int] = []
+var _next_ui_callback_id: int = 1
 
 func _init(id: String) -> void:
 	mod_id = id
@@ -173,6 +176,11 @@ func close() -> void:
 	_lifecycle_handlers.clear()
 	_event_handlers.clear()
 	_remote_interfaces.clear()
+	
+	_ui_callbacks.clear() # it needs to happen BEFORE _handler_coroutines.clear()
+	_ui_coroutines.clear()
+	_ui_pending_release.clear()
+	_next_ui_callback_id = 1
 	
 	_handler_coroutines.clear()
 	_remote_coroutines.clear() # it needs to happen AFTER _remote_interfaces.clear()
@@ -949,4 +957,85 @@ func _validate_game_api_members() -> bool:
 			return false
 	
 	return true
+#endregion
+
+
+#region UI callbacks
+func retain_ui_callback(callback: Variant) -> int:
+	if _phase != Phase.ACTIVE or _inside_on_load:
+		errors.append("UI callbacks cannot be registered in the current phase.")
+		return 0
+	
+	if not callback is LuaFunction or callback.get_lua_state() != _lua_state:
+		errors.append("Invalid or foreign UI callback in mod '%s'." % mod_id)
+		return 0
+	
+	var coroutine := _execution_guard.get_active_coroutine()
+	if coroutine == null:
+		errors.append("UI callbacks must be registered during protected Lua execution.")
+		return 0
+	
+	var callback_id := _next_ui_callback_id
+	_next_ui_callback_id += 1
+	_ui_callbacks[callback_id] = callback
+	_ui_coroutines[callback_id] = coroutine
+	return callback_id
+
+
+func invoke_ui_callback(callback_id: int, arguments: Array = [], expect_result: bool = false) -> Dictionary:
+	if _phase != Phase.ACTIVE or _inside_on_load or not _ui_callbacks.has(callback_id):
+		return {"ok": false, "error": "UI callback is unavailable."}
+	
+	if not errors.is_empty():
+		return {"ok": false, "error": "RuntimeState contains errors."}
+	
+	var callback: LuaFunction = _ui_callbacks[callback_id]
+	var origin: LuaCoroutine = _ui_coroutines[callback_id]
+	var lua_arguments: Array = []
+	for argument in arguments:
+		lua_arguments.append(LuaUtils.to_lua_value(_lua_state, argument))
+	var success := _execution_guard.invoke(
+		_lua_state,
+		callback,
+		lua_arguments,
+		"%s/ui:%d" % [mod_id, callback_id],
+		Callable(self, "_serialize_remote_result")
+	)
+	if not success:
+		errors.append("Lua UI callback error in mod '%s': %s" % [
+			mod_id, _execution_guard.last_error
+		])
+	_validate_runtime_apis()
+	var result: Variant = _execution_guard.last_result
+	var valid := success and errors.is_empty()
+	callback = null
+	origin = null
+	_flush_ui_callback_releases()
+	if not valid:
+		return {"ok": false, "error": str(errors)}
+	return {"ok": true, "value": result if expect_result else null}
+
+
+func release_ui_callback(callback_id: int) -> void:
+	if not _ui_callbacks.has(callback_id):
+		return
+	
+	if _execution_guard.get_active_coroutine() != null:
+		if not _ui_pending_release.has(callback_id):
+			_ui_pending_release.append(callback_id)
+		return
+	
+	_ui_callbacks.erase(callback_id)
+	_ui_coroutines.erase(callback_id)
+
+
+func _flush_ui_callback_releases() -> void:
+	if _execution_guard.get_active_coroutine() != null:
+		return
+	
+	for callback_id in _ui_pending_release:
+		_ui_callbacks.erase(callback_id)
+		_ui_coroutines.erase(callback_id)
+	
+	_ui_pending_release.clear()
 #endregion

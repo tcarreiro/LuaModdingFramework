@@ -1,5 +1,7 @@
 extends Node
 
+signal runtime_log_changed(message: String)
+
 const GAME_VERSION := "0.1.0"
 
 const RUNTIME_SAVE_PATH := "user://lua_modder_playground.save"
@@ -18,6 +20,10 @@ var selected_mod_ids: Array[String] = []
 var settings_registry: SettingsRegistry
 var selected_settings: Dictionary[String, Variant] = {}
 var content_registry: ContentRegistry
+
+# UI: catálogo permanente do consumidor; mount temporário da tela de Runtime.
+var ui_catalog: PlaygroundUiCatalog
+var _ui_mount: Control
 
 # Settings stage
 var prepare_errors: Array[String] = []
@@ -38,6 +44,11 @@ func _ready() -> void:
 
 	for error in mod_manager.discovery_errors:
 		push_warning("[GameMods] %s" % error)
+
+	ui_catalog = PlaygroundUiCatalog.new()
+	if not ui_catalog.build():
+		for error in ui_catalog.errors:
+			push_error("[PlaygroundUI] %s" % error)
 
 
 func get_available_mods() -> Array[ModManifest]:
@@ -79,7 +90,6 @@ func prepare_new_game(mod_ids: Array[String]) -> bool:
 		selected_settings[setting.id] = setting.get_effective_value()
 
 	return true
-
 
 
 func run_content_stage() -> bool:
@@ -147,6 +157,22 @@ func _validate_gauntlet(data: Dictionary) -> String:
 	return ""
 
 
+func attach_ui_mount(mount: Control) -> bool:
+	if mount == null or not is_instance_valid(mount) or not mount.is_inside_tree():
+		runtime_errors.append("O ponto de montagem da UI não está na SceneTree.")
+		return false
+	if is_runtime_active():
+		runtime_errors.append("Não é permitido alterar o mount durante um Runtime ativo.")
+		return false
+	_ui_mount = mount
+	return true
+
+
+func detach_ui_mount(mount: Control) -> void:
+	if _ui_mount == mount:
+		_ui_mount = null
+
+
 func start_new_runtime() -> bool:
 	world_time = 0
 	runtime_log.clear()
@@ -158,6 +184,12 @@ func _start_runtime(existing_mod_ids: Array[String] = [], saved_storage: Diction
 
 	if content_registry == null or selected_mods.is_empty():
 		runtime_errors.append("Content Stage must be completed before Runtime Stage.")
+		return false
+	if _ui_mount == null or not is_instance_valid(_ui_mount) or not _ui_mount.is_inside_tree():
+		runtime_errors.append("Runtime Stage requer um mount de UI válido.")
+		return false
+	if ui_catalog == null or not ui_catalog.component_registry.is_finalized():
+		runtime_errors.append("O catálogo de UI do consumidor não foi finalizado.")
 		return false
 
 	var api := RuntimeApiRegistry.new()
@@ -171,11 +203,18 @@ func _start_runtime(existing_mod_ids: Array[String] = [], saved_storage: Diction
 		return false
 
 	runtime_manager = RuntimeManager.new()
+	if not runtime_manager.configure_ui_bridge(Callable(self, "_create_mod_ui_bridge")):
+		return _runtime_failed()
 
 	if not runtime_manager.prepare(selected_mods):
 		return _runtime_failed()
 
 	if not runtime_manager.activate({}, existing_mod_ids, null, saved_storage, api):
+		return _runtime_failed()
+
+	# on_load() não possui acesso ao game. A UI é reconstruída somente
+	# depois da ativação completa, tanto em jogos novos quanto restaurados.
+	if not runtime_manager.emit_event("on_ui_ready"):
 		return _runtime_failed()
 
 	_add_runtime_log("Runtime ativo: %s" % ", ".join(PackedStringArray(runtime_manager.get_mod_ids())))
@@ -203,6 +242,12 @@ func stop_runtime() -> void:
 	if runtime_manager != null:
 		runtime_manager.close()
 		runtime_manager = null
+	# Os bridges encerram os componentes Lua antes de os LuaStates fecharem.
+	# Os hosts visuais são exclusivos do playground e pertencem à tela atual.
+	if _ui_mount != null and is_instance_valid(_ui_mount):
+		for child in _ui_mount.get_children():
+			child.hide()
+			child.queue_free()
 
 
 func _runtime_failed() -> bool:
@@ -211,6 +256,25 @@ func _runtime_failed() -> bool:
 
 	stop_runtime()
 	return false
+
+
+func _create_mod_ui_bridge(mod_id: String, state: RuntimeState) -> UIRuntimeBridge:
+	# Chamado pela factory REAL do RuntimeManager, uma vez para cada mod.
+	var host := VBoxContainer.new()
+	host.name = "UI_%s" % mod_id
+	host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	host.add_theme_constant_override("separation", 8)
+
+	var heading := Label.new()
+	heading.text = "MOD  /  %s" % mod_id.to_upper()
+	heading.add_theme_font_size_override("font_size", 13)
+	heading.add_theme_color_override("font_color", Color("#91afc9"))
+	host.add_child(heading)
+	_ui_mount.add_child(host)
+
+	var bridge := UIRuntimeBridge.new()
+	bridge.setup(ui_catalog.component_registry, host, state)
+	return bridge
 
 
 #region Persistence
@@ -357,3 +421,4 @@ func _runtime_log_message(message: Variant) -> void:
 func _add_runtime_log(message: String) -> void:
 	runtime_log.append(message)
 	print("[RuntimePlayground] ", message)
+	runtime_log_changed.emit(message)

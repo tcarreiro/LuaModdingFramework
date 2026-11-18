@@ -1,0 +1,131 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://example/scenes/main_menu.gd" id="1_script"]
+
+[sub_resource type="StyleBoxFlat" id="Card"]
+bg_color = Color(0.083, 0.111, 0.156, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.24, 0.34, 0.46, 1)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+shadow_color = Color(0, 0, 0, 0.3)
+shadow_size = 12
+
+[node name="MainMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.037, 0.051, 0.077, 1)
+mouse_filter = 2
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Card" type="PanelContainer" parent="Center"]
+custom_minimum_size = Vector2(520, 440)
+layout_mode = 2
+theme_override_styles/panel = SubResource("Card")
+
+[node name="Padding" type="MarginContainer" parent="Center/Card"]
+layout_mode = 2
+theme_override_constants/margin_left = 48
+theme_override_constants/margin_top = 44
+theme_override_constants/margin_right = 48
+theme_override_constants/margin_bottom = 36
+
+[node name="Body" type="VBoxContainer" parent="Center/Card/Padding"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="Eyebrow" type="Label" parent="Center/Card/Padding/Body"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.45, 0.74, 0.86, 1)
+theme_override_font_sizes/font_size = 14
+text = "FRAMEWORK  /  LUA MODDER"
+horizontal_alignment = 1
+
+[node name="Title" type="Label" parent="Center/Card/Padding/Body"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.93, 0.96, 1, 1)
+theme_override_font_sizes/font_size = 36
+text = "Playground"
+horizontal_alignment = 1
+
+[node name="Description" type="Label" parent="Center/Card/Padding/Body"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.62, 0.69, 0.79, 1)
+text = "Teste o lifecycle, os mods e a nova API de UI"
+horizontal_alignment = 1
+
+[node name="Space" type="Control" parent="Center/Card/Padding/Body"]
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+
+[node name="MainOptions" type="VBoxContainer" parent="Center/Card/Padding/Body"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PlayButton" type="Button" parent="Center/Card/Padding/Body/MainOptions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+text = "Play"
+
+[node name="SettingsButton" type="Button" parent="Center/Card/Padding/Body/MainOptions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+text = "Settings (em breve)"
+
+[node name="QuitButton" type="Button" parent="Center/Card/Padding/Body/MainOptions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+text = "Quit"
+
+[node name="PlayOptions" type="VBoxContainer" parent="Center/Card/Padding/Body"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="NewGameButton" type="Button" parent="Center/Card/Padding/Body/PlayOptions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+text = "New Game"
+
+[node name="LoadGameButton" type="Button" parent="Center/Card/Padding/Body/PlayOptions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+text = "Load Game (em breve)"
+
+[node name="BackButton" type="Button" parent="Center/Card/Padding/Body/PlayOptions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+text = "Voltar"
