@@ -4,4 +4,4 @@ class_name ContentLoot extends Resource
 @export var max_stack: int = 1
 @export var weight: float = 1.0
 
-var _runtime_cache: int = 0
+var runtime_cache: int = 0

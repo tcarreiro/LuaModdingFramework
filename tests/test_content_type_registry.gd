@@ -63,7 +63,7 @@ func test_internal_properties_are_not_exposed() -> void:
 
 	var properties := registry.get_properties("loot")
 
-	assert_false(properties.has("_runtime_cache"))
+	assert_false(properties.has("runtime_cache"))
 
 
 func test_get_properties_returns_copy() -> void:
