@@ -1,0 +1,44 @@
+[
+  {
+    "id": "core:difficulty",
+    "display_name": "Dificuldade",
+    "order": "01",
+    "value_type": "string",
+    "scope": "startup",
+    "default_value": "Normal",
+    "allowed_values": [
+      "Fácil",
+      "Normal",
+      "Difícil"
+    ]
+  },
+  {
+    "id": "core:starting_equipment",
+    "display_name": "Equipamento inicial",
+    "order": "02",
+    "value_type": "string",
+    "scope": "startup",
+    "default_value": "Manopla de Bronze",
+    "allowed_values": [
+      "Manopla de Bronze"
+    ]
+  },
+  {
+    "id": "core:world_seed",
+    "display_name": "Semente do mundo",
+    "order": "03",
+    "value_type": "int",
+    "scope": "startup",
+    "default_value": 12345,
+    "minimum_value": 1,
+    "maximum_value": 999999
+  },
+  {
+    "id": "core:show_tutorial",
+    "display_name": "Mostrar tutoriais",
+    "order": "04",
+    "value_type": "bool",
+    "scope": "startup",
+    "default_value": true
+  }
+]

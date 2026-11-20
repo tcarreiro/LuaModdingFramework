@@ -1,0 +1,14 @@
+[gd_scene load_steps=3 format=3 uid="uid://bo664ob21rrci"]
+
+[ext_resource type="Script" uid="uid://bo4pb80dpejql" path="res://addons/lua-modder/ui/premades/div/ui_component_div.gd" id="1_v61d2"]
+
+[sub_resource type="StyleBoxEmpty" id="1_transparent"]
+
+[node name="Div" type="PanelContainer" unique_id=1892727639]
+mouse_filter = 1
+theme_override_styles/panel = SubResource("1_transparent")
+script = ExtResource("1_v61d2")
+
+[node name="Content" type="BoxContainer" parent="." unique_id=1670688210]
+layout_mode = 2
+mouse_filter = 2

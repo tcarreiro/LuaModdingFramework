@@ -11,7 +11,6 @@ func run(mods: Array[ModManifest], initial_data: Dictionary = {}) -> SettingsReg
 	if mods.is_empty():
 		errors.append("Cannot run Settings Stage without mods.")
 		return null
-
 	var state := SettingsState.new()
 	state.start()
 	if not _load_definitions(state, mods) \
@@ -19,7 +18,6 @@ func run(mods: Array[ModManifest], initial_data: Dictionary = {}) -> SettingsReg
 			or not _run_lua_round(state, mods, SETTINGS_FINAL_FIXES_FILE_NAME):
 		_abort(state)
 		return null
-
 	var registry := state.finish()
 	errors.append_array(state.get_errors())
 	warnings.append_array(state.get_warnings())

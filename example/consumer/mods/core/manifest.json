@@ -1,0 +1,9 @@
+{
+  "id": "core",
+  "version": "1.0.0",
+  "game_version": "1.0",
+  "display_name": "Core",
+  "description": "Regras e HUD do jogo de exemplo.",
+  "author": "Consumer Demo",
+  "dependencies": []
+}

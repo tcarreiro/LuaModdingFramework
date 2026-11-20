@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://b0885tvs2yq4a"]
+
+[ext_resource type="Script" uid="uid://b7jp3l271hoiy" path="res://addons/lua-modder/ui/premades/sprite/ui_component_sprite.gd" id="1_sprite"]
+
+[node name="Sprite" type="TextureRect" unique_id=510063384]
+expand_mode = 1
+script = ExtResource("1_sprite")

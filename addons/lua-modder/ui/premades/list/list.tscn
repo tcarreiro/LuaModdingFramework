@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/lua-modder/ui/premades/list/ui_component_list.gd" id="1_script"]
+
+[node name="List" type="ItemList"]
+script = ExtResource("1_script")

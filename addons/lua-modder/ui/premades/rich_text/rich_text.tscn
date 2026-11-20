@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/lua-modder/ui/premades/rich_text/ui_component_rich_text.gd" id="1_script"]
+
+[node name="RichText" type="RichTextLabel"]
+custom_minimum_size = Vector2(160, 24)
+bbcode_enabled = true
+fit_content = true
+script = ExtResource("1_script")

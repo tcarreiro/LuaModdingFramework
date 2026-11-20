@@ -1,0 +1,20 @@
+[
+  {
+    "id": "ambient:weather",
+    "display_name": "Clima dinâmico",
+    "order": "01",
+    "value_type": "bool",
+    "scope": "startup",
+    "default_value": true
+  },
+  {
+    "id": "ambient:weather_strength",
+    "display_name": "Intensidade do clima",
+    "order": "02",
+    "value_type": "int",
+    "scope": "startup",
+    "default_value": 60,
+    "minimum_value": 0,
+    "maximum_value": 100
+  }
+]

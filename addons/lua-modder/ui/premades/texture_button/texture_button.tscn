@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/lua-modder/ui/premades/texture_button/ui_component_texture_button.gd" id="1_script"]
+
+[node name="TextureButton" type="TextureButton"]
+custom_minimum_size = Vector2(42, 42)
+script = ExtResource("1_script")

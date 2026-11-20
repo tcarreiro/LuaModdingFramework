@@ -6,35 +6,28 @@ static func is_valid(version: String) -> bool:
 	var parts:= version.split(".")
 	if parts.size() != 3:
 		return false
-	
 	for part in parts:
 		if part.is_empty():
 			return false
-		
 		for i in range(part.length()):
 			var character := part.substr(i, 1)
 			if character < "0" or character > "9":
 				return false
-			
 			if int(part) > 65535:
 				return false
-	
 	return true
 
 
 static func compare(a: String, b: String) -> int:
 	var a_parts := a.split(".")
 	var b_parts := b.split(".")
-	
 	for i in range(3):
 		var a_value := int(a_parts[i])
 		var b_value := int(b_parts[i])
-		
 		if a_value < b_value:
 			return -1
 		if a_value > b_value:
 			return 1
-	
 	return 0
 
 
@@ -63,7 +56,6 @@ static func is_compatibility_line(version: String) -> bool:
 	var parts := version.split(".")
 	if parts.size() != 2:
 		return false
-	
 	return is_valid(version + ".0")
 
 

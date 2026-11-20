@@ -22,7 +22,6 @@ return function(native_call)
 end
 """
 
-
 var mod_id: String
 
 var _phase: int = Phase.CREATED
@@ -45,7 +44,10 @@ var _remote_coroutines: Dictionary = {}
 var _remote_native_call: LuaFunction
 var _remote_call_sink: Callable
 var _remote_has_sink: Callable
-
+var _ui_callbacks: Dictionary[int, LuaFunction] = {}
+var _ui_coroutines: Dictionary[int, LuaCoroutine] = {}
+var _ui_pending_release: Array[int] = []
+var _next_ui_callback_id: int = 1
 
 func _init(id: String) -> void:
 	mod_id = id
@@ -58,7 +60,6 @@ func start(mod_versions: Dictionary = {}) -> bool:
 	if mod_id.strip_edges().is_empty():
 		errors.append("RuntimeState requires a mod ID.")
 		return false
-
 	_lua_state = LuaState.new()
 	_lua_state.open_libraries(LuaState.LUA_BASE | LuaState.LUA_STRING | LuaState.LUA_TABLE | LuaState.LUA_MATH)
 	LuaExecutionGuard.restrict_base_functions(_lua_state)
@@ -67,7 +68,6 @@ func start(mod_versions: Dictionary = {}) -> bool:
 	_create_script_api()
 	if not _create_remote_api():
 		return false
-
 	_lua_state.globals["mods"] = LuaUtils.to_lua_value(_lua_state, mod_versions)
 	_lua_state.globals["game"] = null
 	_phase = Phase.SETUP
@@ -78,20 +78,16 @@ func execute(source: String, _mod_id: String = "", chunk_name: String = "") -> b
 	if _phase != Phase.SETUP:
 		errors.append("Mod '%s' cannot execute control.lua outside setup." % mod_id)
 		return false
-	
 	if not errors.is_empty():
 		return false
-	
 	var success := _execution_guard.execute(_lua_state, source, chunk_name)
 	if not success:
 		errors.append("Lua error in mod '%s' (%s): %s" % [
 			mod_id, chunk_name, _execution_guard.last_error
 		])
 		return false
-	
 	if not errors.is_empty():
 		return false
-	
 	return _validate_setup_api()
 
 
@@ -108,13 +104,11 @@ func activate(game_functions: Dictionary = {}, api_registry: RuntimeApiRegistry 
 		return false
 	if not _validate_activation_api(game_functions, api_registry):
 		return false
-
 	_game_api = _lua_state.create_table()
 	_game_api_entries.clear()
 	_add_legacy_game_functions(game_functions)
 	if api_registry != null:
 		_add_namespaced_game_functions(api_registry.get_functions())
-
 	_lua_state.globals.rawset("game", _game_api)
 	_phase = Phase.ACTIVE
 	return true
@@ -130,7 +124,6 @@ func run_lifecycle(handler_name: String, data: Dictionary = {}) -> bool:
 		return false
 	if not _lifecycle_handlers.has(handler_name):
 		return true
-
 	var is_load := handler_name == "on_load"
 	var before: Dictionary = {}
 	if is_load:
@@ -140,14 +133,12 @@ func run_lifecycle(handler_name: String, data: Dictionary = {}) -> bool:
 			return false
 		_lua_state.globals.rawset("game", null)
 	_inside_on_load = is_load
-
 	var arguments: Array = []
 	if handler_name == "on_configuration_changed":
 		arguments.append(LuaUtils.to_lua_value(_lua_state, data))
 	var callback: LuaFunction = _lifecycle_handlers[handler_name]
 	var success := _execution_guard.invoke(_lua_state, callback, arguments, "%s/%s" % [mod_id, handler_name])
 	_inside_on_load = false
-
 	_restore_game_after_lifecycle(is_load, handler_name)
 	if not success:
 		errors.append("Lua error in mod '%s' (%s): %s" % [mod_id, handler_name, _execution_guard.last_error])
@@ -173,6 +164,11 @@ func close() -> void:
 	_lifecycle_handlers.clear()
 	_event_handlers.clear()
 	_remote_interfaces.clear()
+	
+	_ui_callbacks.clear() # it needs to happen BEFORE _handler_coroutines.clear()
+	_ui_coroutines.clear()
+	_ui_pending_release.clear()
+	_next_ui_callback_id = 1
 	
 	_handler_coroutines.clear()
 	_remote_coroutines.clear() # it needs to happen AFTER _remote_interfaces.clear()
@@ -702,7 +698,6 @@ func _validate_activation_api(game_functions: Dictionary, registry: RuntimeApiRe
 		if not callback is Callable or not callback.is_valid():
 			errors.append("Invalid runtime API function '%s'." % function_name)
 			return false
-	
 	if registry == null:
 		return true
 	if not registry.errors.is_empty():
@@ -784,22 +779,18 @@ func _register_lifecycle_handler(handler_name: String, handler: Variant) -> bool
 	if _phase != Phase.SETUP:
 		errors.append("Lifecycle callbacks can only be registered during setup.")
 		return false
-	
 	if handler != null and not handler is LuaFunction:
 		errors.append("Handler '%s' must be a Lua function or nil." % handler_name)
 		return false
-	
 	var key := "lifecycle:" + handler_name
 	if handler == null:
 		_lifecycle_handlers.erase(handler_name)
 		_handler_coroutines.erase(key)
 		return true
-	
 	var coroutine := _execution_guard.get_active_coroutine()
 	if coroutine == null:
 		errors.append("Cannot register lifecycle handler outside protected Lua execution.")
 		return false
-	
 	_lifecycle_handlers[handler_name] = handler
 	_handler_coroutines[key] = coroutine
 	return true
@@ -810,32 +801,26 @@ func _validate_script_api() -> bool:
 	if not current_script is LuaTable:
 		errors.append("Mod '%s' removed or replaced the script API." % mod_id)
 		return false
-	
 	if not LuaUtils.same_lua_object(_lua_state, current_script, _script_api):
 		errors.append("Mod '%s' replaced the script API." % mod_id)
 		return false
-	
 	for function_name in _script_functions:
 		var current_function: Variant = _script_api.rawget(function_name)
 		var expected_function: LuaFunction = _script_functions[function_name]
 		if not current_function is LuaFunction or not LuaUtils.same_lua_object(_lua_state, current_function, expected_function):
 			errors.append("Mod '%s' replaced script.%s." % [mod_id, function_name])
 			return false
-	
 	return true
 
 
 func _validate_setup_api() -> bool:
 	if not _validate_script_api():
 		return false
-	
 	if not _validate_remote_api():
 		return false
-	
 	if _lua_state.globals.rawget("game") != null:
 		errors.append("Mod '%s' attempted to define game during setup." % mod_id)
 		return false
-	
 	return _validate_storage_api()
 
 
@@ -852,17 +837,14 @@ func _read_custom_event_value(value: Variant, depth: int, visited: Dictionary, c
 	if depth > 32 or counter[0] > 10_000:
 		errors.append("Custom event payload exceeds its size or depth limits.")
 		return null
-	
 	if value is LuaTable:
 		if value.get_lua_state() != _lua_state:
 			errors.append("Custom event payload contains a foreign Lua table.")
 			return null
-	
 		var pointer: int = value.get_pointer_value()
 		if visited.has(pointer):
 			errors.append("Circular tables are not supported in custom event payloads.")
 			return null
-	
 		visited[pointer] = true
 		var result: Dictionary = {}
 		var source: Dictionary = value.to_dictionary()
@@ -870,43 +852,34 @@ func _read_custom_event_value(value: Variant, depth: int, visited: Dictionary, c
 			if typeof(key) != TYPE_STRING and typeof(key) != TYPE_INT:
 				errors.append("Unsupported custom event table key.")
 				break
-	
 			result[key] = _read_custom_event_value(source[key], depth + 1, visited, counter)
 			if not errors.is_empty():
 				break
-	
 		visited.erase(pointer)
 		return result
-	
 	if value is Dictionary:
 		var result: Dictionary = {}
 		for key in value:
 			if typeof(key) != TYPE_STRING and typeof(key) != TYPE_INT:
 				errors.append("Unsupported custom event dictionary key.")
 				return null
-	
 			result[key] = _read_custom_event_value(value[key], depth + 1, visited, counter)
 			if not errors.is_empty():
 				return null
-	
 		return result
-	
 	if value is Array:
 		var result: Array = []
 		for element in value:
 			result.append(_read_custom_event_value(element, depth + 1, visited, counter))
-	
 			if not errors.is_empty():
 				return null
 		return result
-	
 	match typeof(value):
 		TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_STRING:
 			return value
 		TYPE_FLOAT:
 			if is_finite(value):
 				return value
-	
 	errors.append("Unsupported custom event payload value.")
 	return null
 
@@ -916,18 +889,15 @@ func _validate_remote_api() -> bool:
 	if not current_remote is LuaTable:
 		errors.append("Mod '%s' removed or replaced the remote API." % mod_id)
 		return false
-	
 	if not LuaUtils.same_lua_object(_lua_state, current_remote, _remote_api):
 		errors.append("Mod '%s' replaced the remote API." % mod_id)
 		return false
-	
 	for function_name in _remote_functions:
 		var current_function: Variant = _remote_api.rawget(function_name)
 		var expected_function: LuaFunction = _remote_functions[function_name]
 		if not current_function is LuaFunction or not LuaUtils.same_lua_object(_lua_state, current_function, expected_function):
 			errors.append("Mod '%s' replaced remote.%s." % [mod_id, function_name])
 			return false
-	
 	return true
 
 
@@ -947,6 +917,77 @@ func _validate_game_api_members() -> bool:
 		if not LuaUtils.same_lua_object(_lua_state, current, expected):
 			errors.append("Mod '%s' replaced game.%s." % [mod_id, full_path])
 			return false
-	
 	return true
+#endregion
+
+
+#region UI callbacks
+func retain_ui_callback(callback: Variant) -> int:
+	if _phase != Phase.ACTIVE or _inside_on_load:
+		errors.append("UI callbacks cannot be registered in the current phase.")
+		return 0
+	if not callback is LuaFunction or callback.get_lua_state() != _lua_state:
+		errors.append("Invalid or foreign UI callback in mod '%s'." % mod_id)
+		return 0
+	var coroutine := _execution_guard.get_active_coroutine()
+	if coroutine == null:
+		errors.append("UI callbacks must be registered during protected Lua execution.")
+		return 0
+	var callback_id := _next_ui_callback_id
+	_next_ui_callback_id += 1
+	_ui_callbacks[callback_id] = callback
+	_ui_coroutines[callback_id] = coroutine
+	return callback_id
+
+
+func invoke_ui_callback(callback_id: int, arguments: Array = [], expect_result: bool = false) -> Dictionary:
+	if _phase != Phase.ACTIVE or _inside_on_load or not _ui_callbacks.has(callback_id):
+		return {"ok": false, "error": "UI callback is unavailable."}
+	if not errors.is_empty():
+		return {"ok": false, "error": "RuntimeState contains errors."}
+	var callback: LuaFunction = _ui_callbacks[callback_id]
+	var origin: LuaCoroutine = _ui_coroutines[callback_id]
+	var lua_arguments: Array = []
+	for argument in arguments:
+		lua_arguments.append(LuaUtils.to_lua_value(_lua_state, argument))
+	var success := _execution_guard.invoke(
+		_lua_state,
+		callback,
+		lua_arguments,
+		"%s/ui:%d" % [mod_id, callback_id],
+		Callable(self, "_serialize_remote_result")
+	)
+	if not success:
+		errors.append("Lua UI callback error in mod '%s': %s" % [
+			mod_id, _execution_guard.last_error
+		])
+	_validate_runtime_apis()
+	var result: Variant = _execution_guard.last_result
+	var valid := success and errors.is_empty()
+	callback = null
+	origin = null
+	_flush_ui_callback_releases()
+	if not valid:
+		return {"ok": false, "error": str(errors)}
+	return {"ok": true, "value": result if expect_result else null}
+
+
+func release_ui_callback(callback_id: int) -> void:
+	if not _ui_callbacks.has(callback_id):
+		return
+	if _execution_guard.get_active_coroutine() != null:
+		if not _ui_pending_release.has(callback_id):
+			_ui_pending_release.append(callback_id)
+		return
+	_ui_callbacks.erase(callback_id)
+	_ui_coroutines.erase(callback_id)
+
+
+func _flush_ui_callback_releases() -> void:
+	if _execution_guard.get_active_coroutine() != null:
+		return
+	for callback_id in _ui_pending_release:
+		_ui_callbacks.erase(callback_id)
+		_ui_coroutines.erase(callback_id)
+	_ui_pending_release.clear()
 #endregion

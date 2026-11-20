@@ -118,7 +118,6 @@ func _parse_manifest_data(data: Dictionary, path: String, root_path: String) -> 
 	if typeof(dependency_values) != TYPE_ARRAY:
 		discovery_errors.append("Dependencies must be an Array: %s." % path)
 		return null
-
 	var manifest := ModManifest.new()
 	manifest.id = id
 	manifest.version = version_value
@@ -148,14 +147,11 @@ func _parse_dependencies(manifest: ModManifest, dependency_values: Array, path: 
 
 func get_available_mods() -> Array[ModManifest]:
 	var result: Array[ModManifest] = []
-	
 	for manifest in _manifests.values():
 		result.append(manifest)
-	
 	result.sort_custom(func(a: ModManifest, b: ModManifest) -> bool:
 		return a.id.naturalcasecmp_to(b.id) < 0
 	)
-	
 	return result
 
 
@@ -169,7 +165,6 @@ func resolve(requested_ids: Array[String]) -> Array[ModManifest]:
 	if not ModVersion.is_valid(game_version):
 		resolution_errors.append("Invalid current game version: %s" % game_version)
 		return ordered
-
 	var enabled := _collect_enabled_mods(requested_ids)
 	if not resolution_errors.is_empty():
 		return ordered
@@ -282,18 +277,15 @@ func _calculate_depth(id: String, enabled: Dictionary[String, bool], states: Dic
 		var dependency_depth := _calculate_depth(dependency.id, enabled, states, depths, chain)
 		if dependency_depth < 0:
 			return -1
-		
 		depth = maxi(depth, dependency_depth + 1)
 	
 	if id != CORE_MOD_ID:
 		var core_depth := _calculate_depth(CORE_MOD_ID, enabled, states, depths, chain)
 		if core_depth < 0:
 			return -1
-
 		depth = maxi(depth, core_depth + 1)
-		
+	
 	chain.pop_back()
 	states[id] = RESOLVED
 	depths[id] = depth
-	
 	return depth

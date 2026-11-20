@@ -16,11 +16,9 @@ func register_struct(type_id: String, struct_script: Script, validator: Callable
 func get_parent_type(type_id: String) -> String:
 	if not has_type(type_id):
 		return ""
-
 	var declared_parent: String = _registered[type_id]["parent_type_id"]
 	if not declared_parent.is_empty():
 		return declared_parent
-
 	var candidates := _get_inferred_parent_candidates(type_id)
 	return candidates[0] if candidates.size() == 1 else ""
 
@@ -29,7 +27,6 @@ func get_type_lineage(type_id: String) -> Array[String]:
 	var lineage: Array[String] = []
 	if not has_type(type_id):
 		return lineage
-
 	var visited: Dictionary = {}
 	var current := type_id
 	while not current.is_empty():
@@ -38,7 +35,6 @@ func get_type_lineage(type_id: String) -> Array[String]:
 		visited[current] = true
 		lineage.push_front(current)
 		current = get_parent_type(current)
-
 	return lineage
 
 
@@ -52,11 +48,9 @@ func get_derived_types(parent_type: String) -> Array[String]:
 	var result: Array[String] = []
 	if not has_type(parent_type):
 		return result
-
 	for candidate_id in get_registered_types():
 		if is_subtype(candidate_id, parent_type):
 			result.append(candidate_id)
-
 	return result
 
 
@@ -73,13 +67,11 @@ func validate_inheritance() -> bool:
 			errors.append("Template '%s' has ambiguous GDScript parents; declare its parent explicitly." % type_id)
 			valid = false
 			continue
-	
 		var parent_type := get_parent_type(type_id)
 		if not parent_type.is_empty() and not has_type(parent_type):
 			errors.append("Template '%s' has unknown parent Template '%s'." % [type_id, parent_type])
 			valid = false
 			continue
-	
 		if get_type_lineage(type_id).is_empty():
 			errors.append("Template inheritance cycle detected for '%s'." % type_id)
 			valid = false
@@ -206,7 +198,6 @@ func get_registered_script(type_id: String) -> Script:
 func get_properties(type_id: String) -> Dictionary:
 	if has_struct(type_id):
 		return _get_registered_properties(type_id).duplicate(true)
-
 	var properties: Dictionary = {}
 	for ancestor in get_type_lineage(type_id):
 		var own_properties: Dictionary = _get_registered_properties(ancestor)
@@ -359,11 +350,9 @@ func _register(type_id: String, script: Script, validator: Callable, kind: Strin
 func _get_script_properties(script: Script) -> Dictionary:
 	var hierarchy: Array[Script] = []
 	var current: Script = script
-
 	while current != null:
 		hierarchy.push_front(current)
 		current = current.get_base_script()
-
 	var properties: Dictionary = {}
 	for ancestor in hierarchy:
 		for property in ancestor.get_script_property_list():
@@ -374,7 +363,6 @@ func _get_script_properties(script: Script) -> Dictionary:
 				continue
 			var property_name: String = property.get("name", "")
 			properties[property_name] = property.duplicate(true)
-
 	return properties
 
 
@@ -382,10 +370,8 @@ func _get_inferred_parent_candidates(type_id: String) -> Array[String]:
 	var candidates: Array[String] = []
 	if not has_type(type_id):
 		return candidates
-
 	var script: Script = _registered[type_id]["script"]
 	var ancestor := script.get_base_script()
-
 	while ancestor != null:
 		for candidate_id in get_registered_types():
 			if candidate_id != type_id and _registered[candidate_id]["script"] == ancestor:
@@ -393,17 +379,14 @@ func _get_inferred_parent_candidates(type_id: String) -> Array[String]:
 		if not candidates.is_empty():
 			return candidates
 		ancestor = ancestor.get_base_script()
-
 	return candidates
 
 
 func _get_registered_ids(kind: String) -> Array[String]:
 	var result: Array[String] = []
-	
 	for type_id in _registered:
 		if _get_registered_kind(type_id) == kind:
 			result.append(type_id)
-	
 	result.sort()
 	return result
 

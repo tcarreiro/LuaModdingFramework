@@ -22,6 +22,9 @@ var _custom_event_owners: Dictionary = {}
 var _remote_interface_owners: Dictionary[String, String] = {}
 var _remote_call_stack: Array[String] = []
 var _lifecycle_ready: Dictionary[String, bool] = {}
+var _ui_bridge_factory: Callable
+var _ui_bridges: Dictionary[String, UIRuntimeBridge] = {}
+
 
 func prepare(mods: Array[ModManifest]) -> bool:
 	if _phase != Phase.CREATED:
@@ -31,14 +34,12 @@ func prepare(mods: Array[ModManifest]) -> bool:
 		errors.append("Cannot prepare Runtime Stage without resolved mods.")
 		_fail()
 		return false
-
 	var versions := _read_mod_versions(mods)
 	if versions.is_empty() or not _prepare_mod_states(mods, versions) \
 			or not _finish_mod_setup() or not _collect_custom_event_owners() \
 			or not _collect_remote_interface_owners():
 		_fail()
 		return false
-
 	_phase = Phase.PREPARED
 	return true
 
@@ -51,14 +52,12 @@ func activate(game_functions: Dictionary = {}, existing_mod_ids: Array[String] =
 		return false
 	if not _validate_activation_arguments(game_functions, configuration_changes, api_registry):
 		return false
-	
 	if not _activate_mod_states(game_functions, api_registry) \
 			or not _restore_existing_storage(existing_mod_ids, saved_storage) \
 			or not _run_initial_lifecycle(existing_mod_ids) \
 			or not _run_configuration_lifecycle(configuration_changes):
 		_fail()
 		return false
-	
 	_phase = Phase.ACTIVE
 	return _flush_event_queue()
 
@@ -67,7 +66,6 @@ func snapshot_storage() -> Dictionary:
 	if _phase != Phase.ACTIVE:
 		errors.append("Runtime Stage must be active to snapshot storage.")
 		return {}
-	
 	var result: Dictionary = {}
 	for mod_id in _ordered_ids:
 		var state: RuntimeState = _states[mod_id]
@@ -83,11 +81,20 @@ func emit_event(event_name: String, data: Dictionary = {}) -> bool:
 	if _phase != Phase.ACTIVE:
 		errors.append("Runtime Stage must be active to emit events.")
 		return false
-	
 	if not _queue_event(event_name, data, ""):
 		return false
-	
 	return _flush_event_queue()
+
+
+func configure_ui_bridge(factory: Callable) -> bool:
+	if _phase != Phase.CREATED:
+		errors.append("UI Bridge must be configured before Runtime preparation.")
+		return false
+	if not factory.is_valid():
+		errors.append("Invalid UI Bridge factory.")
+		return false
+	_ui_bridge_factory = factory
+	return true
 
 
 func get_phase() -> int:
@@ -99,7 +106,6 @@ func get_mod_ids() -> Array[String]:
 
 
 func get_state(mod_id: String) -> RuntimeState:
-	# Do not allow callers to bypass the manager's activation barrier.
 	if _phase != Phase.ACTIVE:
 		return null
 	return _states.get(mod_id)
@@ -109,10 +115,8 @@ func get_remote_interfaces() -> Array[String]:
 	var result: Array[String] = []
 	if _phase != Phase.PREPARED and _phase != Phase.ACTIVE:
 		return result
-	
 	for interface_name in _remote_interface_owners:
 		result.append(interface_name)
-	
 	return result
 
 
@@ -130,7 +134,6 @@ func has_remote_method(interface_name: String, method_name: String) -> bool:
 	var owner_id := get_remote_interface_owner(interface_name)
 	if owner_id.is_empty():
 		return false
-	
 	var state: RuntimeState = _states.get(owner_id)
 	if state == null:
 		return false
@@ -179,7 +182,6 @@ func _prepare_one_mod(manifest: ModManifest, versions: Dictionary, loader: Runti
 			or not state.start(versions):
 		errors.append_array(state.get_errors())
 		return false
-	
 	var source := loader.read_control(manifest)
 	if not loader.errors.is_empty():
 		errors.append_array(loader.errors)
@@ -234,7 +236,6 @@ func _validate_activation_arguments(game_functions: Dictionary, changes: Variant
 		if not callback is Callable or not callback.is_valid():
 			errors.append("Invalid runtime API function '%s'." % function_name)
 			return false
-	
 	if api != null and not _validate_registered_api(game_functions, api):
 		return false
 	if changes != null and typeof(changes) != TYPE_DICTIONARY:
@@ -260,13 +261,47 @@ func _validate_registered_api(game_functions: Dictionary, api: RuntimeApiRegistr
 	return true
 
 
+
 func _activate_mod_states(game_functions: Dictionary, api: RuntimeApiRegistry) -> bool:
 	for mod_id in _ordered_ids:
 		var state: RuntimeState = _states[mod_id]
-		if not state.activate(game_functions, api):
+		var mod_api := api
+		if _ui_bridge_factory.is_valid():
+			var bridge: Variant = _ui_bridge_factory.call(mod_id, state)
+			if not bridge is UIRuntimeBridge:
+				errors.append("Invalid UI Bridge for mod '%s'." % mod_id)
+				return false
+			_ui_bridges[mod_id] = bridge
+			mod_api = _build_mod_api(api, bridge)
+			if mod_api == null:
+				return false
+		if not state.activate(game_functions, mod_api):
 			errors.append_array(state.get_errors())
 			return false
 	return true
+
+
+func _build_mod_api(base: RuntimeApiRegistry, bridge: UIRuntimeBridge) -> RuntimeApiRegistry:
+	var result := RuntimeApiRegistry.new()
+	if base != null:
+		var functions := base.get_functions()
+		for full_path in functions:
+			var separator := full_path.rfind(".")
+			var _namespace := ""
+			var function_name := full_path
+			if separator >= 0:
+				_namespace = full_path.substr(0, separator)
+				function_name = full_path.substr(separator + 1)
+			if not result.register_function(_namespace, function_name, functions[full_path]):
+				errors.append_array(result.errors)
+				return null
+	for function_name in bridge.get_api_functions():
+		if not result.register_function(
+			"ui", function_name, bridge.get_api_functions()[function_name]
+		):
+			errors.append_array(result.errors)
+			return null
+	return result
 
 
 func _restore_existing_storage(existing_ids: Array[String], saved: Dictionary) -> bool:
@@ -313,10 +348,14 @@ func _fail() -> void:
 
 
 func _release_states() -> void:
+	for bridge in _ui_bridges.values():
+		bridge.close()
+	_ui_bridges.clear()
+	
 	for state in _states.values():
 		state.close()
-	
 	_states.clear()
+	
 	_ordered_ids.clear()
 	_custom_event_owners.clear()
 	_remote_interface_owners.clear()
@@ -329,11 +368,9 @@ func _release_states() -> void:
 func _is_valid_event_value(value: Variant, depth: int, visited: Array[int]) -> bool:
 	if depth > 32:
 		return false
-	
 	visited[0] += 1
 	if visited[0] > 10_000:
 		return false
-	
 	match typeof(value):
 		TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_STRING:
 			return true
@@ -481,7 +518,6 @@ func _invoke_remote(caller_id: String, interface_name: String, method_name: Stri
 	_remote_call_stack.append(owner_id)
 	var target: RuntimeState = _states[owner_id]
 	var response := target.invoke_remote(interface_name, method_name, arguments)
-	
 	_remote_call_stack.pop_back()
 	if root_call:
 		_remote_call_stack.pop_back()
