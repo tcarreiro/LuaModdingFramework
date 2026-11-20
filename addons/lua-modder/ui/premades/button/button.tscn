@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://0nxvfnrw7xta"]
+
+[ext_resource type="Script" uid="uid://cxtpredmnigy7" path="res://addons/lua-modder/ui/premades/button/ui_component_button.gd" id="1_ahpr8"]
+
+[node name="Button" type="Button" unique_id=866097648]
+script = ExtResource("1_ahpr8")

@@ -1,8 +1,0 @@
-{
-	"id":"core",
-	"version": "0.1.0",
-	"display_name": "Base Content",
-	"game_version": "0.1",
-	"description": "Mandatory game content",
-	"dependencies": []
-}

@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://ndfo058qxjo5"]
+
+[ext_resource type="Script" uid="uid://bn46arcm7kcns" path="res://addons/lua-modder/ui/premades/dropdown/ui_component_dropdown.gd" id="1_pu0li"]
+
+[node name="Dropdown" type="OptionButton" unique_id=1043812770]
+script = ExtResource("1_pu0li")

@@ -1,0 +1,33 @@
+[gd_scene format=3 uid="uid://nxspnv58pux3"]
+
+[sub_resource type="Environment" id="environment"]
+background_mode = 1
+background_color = Color(0.13, 0.19, 0.28, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.5, 0.58, 0.7, 1)
+ambient_light_energy = 0.45
+
+[sub_resource type="StandardMaterial3D" id="material_floor"]
+albedo_color = Color(0.16, 0.23, 0.28, 1)
+roughness = 0.95
+
+[sub_resource type="PlaneMesh" id="plane"]
+material = SubResource("material_floor")
+size = Vector2(50, 50)
+
+[node name="World" type="Node3D" unique_id=1996970985]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=213368511]
+environment = SubResource("environment")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=130371874]
+transform = Transform3D(1, 0, 0, 0, 0.8660254, 0.5, 0, -0.5, 0.8660254, 0, 10, 17)
+current = true
+fov = 58.0
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=511562283]
+transform = Transform3D(0.86601907, -0.25000688, 0.43302146, 0, 0.86602384, 0.50000274, -0.500011, -0.43301192, 0.74999315, 0, 10, 0)
+light_energy = 0.7
+
+[node name="Floor" type="MeshInstance3D" parent="." unique_id=1731733707]
+mesh = SubResource("plane")

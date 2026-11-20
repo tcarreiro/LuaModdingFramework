@@ -9,6 +9,7 @@ var owner_mod_id: String = ""
 var scene: PackedScene
 var template: Dictionary = {}
 var properties: Dictionary = {}
+var presentation: String = "inline"
 var slots: Dictionary = {}
 var apply_properties: Callable
 var events: Array[StringName] = []
@@ -60,6 +61,7 @@ func copy() -> UIComponentDefinition:
 	result.scene = scene
 	result.template = template.duplicate(true)
 	result.properties = properties.duplicate(true)
+	result.presentation = presentation
 	result.slots = slots.duplicate(true)
 	result.apply_properties = apply_properties
 	result.events = events.duplicate()

@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/lua-modder/ui/premades/context_menu/ui_component_context_menu.gd" id="1_script"]
+
+[node name="ContextMenu" type="PanelContainer"]
+script = ExtResource("1_script")
+
+[node name="Content" type="VBoxContainer" parent="."]
+layout_mode = 2

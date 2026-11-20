@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/lua-modder/ui/premades/spin_box/ui_component_spin_box.gd" id="1_script"]
+
+[node name="SpinBox" type="SpinBox"]
+script = ExtResource("1_script")

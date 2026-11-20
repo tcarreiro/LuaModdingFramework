@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://5s83vuyani1e"]
+
+[ext_resource type="Script" uid="uid://dx0rt4nwd7wfj" path="res://addons/lua-modder/ui/premades/checkbox/ui_component_checkbox.gd" id="1_fk2uo"]
+
+[node name="Checkbox" type="CheckBox" unique_id=922183823]
+script = ExtResource("1_fk2uo")

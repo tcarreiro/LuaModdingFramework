@@ -1,0 +1,95 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://example/consumer/consumer.gd" id="1_consumer"]
+[ext_resource type="PackedScene" path="res://example/consumer/world/world.tscn" id="2_world"]
+[ext_resource type="Script" path="res://addons/lua-modder/ui/ui_root_host.gd" id="3_ui_root"]
+
+[node name="Consumer" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("1_consumer")
+
+[node name="UIRoot" type="Node" parent="."]
+script = ExtResource("3_ui_root")
+
+[node name="WorldViewportContainer" type="SubViewportContainer" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+stretch = true
+
+[node name="WorldViewport" type="SubViewport" parent="WorldViewportContainer"]
+handle_input_locally = false
+size = Vector2i(1280, 720)
+render_target_update_mode = 4
+
+[node name="World" parent="WorldViewportContainer/WorldViewport" instance=ExtResource("2_world")]
+
+[node name="ScreenMount" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+
+[node name="HudMount" type="Control" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="ModalBackdrop" type="ColorRect" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0.0352941, 0.0588235, 0.0980392, 0.87)
+
+[node name="ModalMount" type="CenterContainer" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+
+[node name="LoadingLayer" type="ColorRect" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0.0392157, 0.0588235, 0.0980392, 1)
+
+[node name="LoadingMount" type="CenterContainer" parent="LoadingLayer"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1

@@ -43,7 +43,6 @@ func restore(lua_state: LuaState, snapshot: Dictionary) -> LuaTable:
 		return null
 	if snapshot.is_empty():
 		return lua_state.create_table()
-
 	var nodes := _read_snapshot_nodes(snapshot)
 	if not errors.is_empty():
 		return null
@@ -121,7 +120,6 @@ func _restore_entry(target: LuaTable, tables: Array[LuaTable], entry: Variant) -
 	if not encoded is Dictionary or encoded.size() != 1:
 		errors.append("Invalid encoded storage value.")
 		return false
-
 	var value: Variant = _decode_storage_value(encoded, tables)
 	if not errors.is_empty():
 		return false
@@ -169,7 +167,6 @@ func _capture_table(table: LuaTable, depth: int) -> int:
 	
 	var source: Dictionary = table.to_dictionary()
 	var entries: Array = _nodes[table_id]["entries"]
-	
 	for key in source:
 		if not _is_atom(key):
 			errors.append("Storage table contains an unsupported key.")
@@ -183,7 +180,6 @@ func _capture_table(table: LuaTable, depth: int) -> int:
 		var encoded := _capture_value(source[key], depth + 1)
 		if not errors.is_empty():
 			return -1
-	
 		entries.append([key, encoded])
 	return table_id
 
@@ -194,7 +190,6 @@ func _capture_value(value: Variant, depth: int) -> Dictionary:
 		if reference < 0:
 			return {}
 		return {"ref": reference}
-	
 	if _is_atom(value):
 		return {"value": value}
 	errors.append("Storage contains an unsupported value: %s." % type_string(typeof(value)))

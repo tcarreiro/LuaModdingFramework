@@ -1,0 +1,10 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/lua-modder/ui/premades/tooltip/ui_component_tooltip.gd" id="1_script"]
+
+[node name="Tooltip" type="MarginContainer"]
+script = ExtResource("1_script")
+
+[node name="Content" type="VBoxContainer" parent="."]
+layout_mode = 2
+mouse_filter = 1

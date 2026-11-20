@@ -18,6 +18,12 @@ var _style_layout: Dictionary = {}
 var _named_children: Dictionary[String, UIComponentInstance] = {}
 var _event_forwarders: Array[Dictionary] = []
 
+func get_recognized_properties() -> Dictionary:
+	if _registry == null:
+		return {}
+	return _registry.get_recognized_properties(component_id, _trusted)
+
+
 func update(changes: Dictionary) -> bool:
 	return _registry != null and _registry.update_component(self, changes)
 

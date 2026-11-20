@@ -46,6 +46,12 @@ func _register(definition: UIComponentDefinition) -> bool:
 		if schema.has("default") and not _valid_type(schema, schema["default"]):
 			errors.append("Invalid default for '%s.%s'." % [definition.id, property_name])
 			return false
+	if definition.presentation not in ["inline", "overlay"]:
+		errors.append("Invalid presentation for component '%s'." % definition.id)
+		return false
+	if definition.kind == UIComponentDefinition.Kind.TEMPLATE and definition.presentation == "overlay":
+		errors.append("Overlay presentation must be provided by a native component.")
+		return false
 	_definitions[definition.id] = definition.copy()
 	return true
 
@@ -86,6 +92,59 @@ func get_definition(id: String) -> UIComponentDefinition:
 	return _definitions[id].copy() if _definitions.has(id) else null
 
 
+func get_recognized_properties(id: String, trusted: bool = false) -> Dictionary:
+	if not _definitions.has(id):
+		return {}
+	var definition: UIComponentDefinition = _definitions[id]
+	if not trusted and not definition.exposed_to_mods:
+		return {}
+	var result := definition.properties.duplicate(true)
+	for name in UIStyleProperties.all_property_names():
+		if not result.has(name):
+			result[name] = {
+				"type": TYPE_NIL,
+				"type_name": UIStyleProperties.property_description(name),
+				"inline_style": true,
+				"mod_editable": true
+			}
+	return result
+
+
+func describe_recognized_properties(id: String, trusted: bool = false) -> Dictionary:
+	var schemas := get_recognized_properties(id, trusted)
+	var result: Dictionary = {}
+	for name in schemas:
+		var schema: Dictionary = schemas[name]
+		var info := {
+			"type": schema.get("type_name", _property_type_name(int(schema.get("type", TYPE_NIL)))),
+			"required": bool(schema.get("required", false)),
+			"mod_editable": bool(schema.get("mod_editable", true))
+		}
+		if schema.has("default"):
+			info["default"] = schema["default"]
+		result[name] = info
+	return result
+
+
+func _property_type_name(type_id: int) -> String:
+	match type_id:
+		TYPE_STRING:
+			return "string"
+		TYPE_BOOL:
+			return "bool"
+		TYPE_INT:
+			return "int"
+		TYPE_FLOAT:
+			return "float"
+		TYPE_ARRAY:
+			return "array"
+		TYPE_DICTIONARY:
+			return "dictionary"
+		TYPE_COLOR:
+			return "color"
+	return type_string(type_id).to_lower()
+
+
 func instantiate_component(id: String, values: Dictionary = {}, trusted: bool = false) -> UIComponentInstance:
 	if not _finalized:
 		errors.append("UI component registry must be finalized before instantiation.")
@@ -108,7 +167,7 @@ func _instantiate(id: String, values: Dictionary, trusted: bool) -> UIComponentI
 	var instance := UIComponentInstance.new()
 	instance.component_id = id
 	instance._registry = self
-	instance._trusted = trusted and definition.owner_mod_id.is_empty()
+	instance._trusted = trusted and definition.owner_mod_id in ["", "core"]
 	instance.values = definition.get_defaults()
 	instance.values.merge(values, true)
 	
@@ -126,10 +185,24 @@ func _instantiate(id: String, values: Dictionary, trusted: bool) -> UIComponentI
 			return null
 		instance.content_root = node as Control
 		instance.root = instance.content_root
+		if definition.presentation == "inline":
+			var flags := Vector2i(Control.SIZE_SHRINK_BEGIN, Control.SIZE_SHRINK_BEGIN)
+			if instance.root.has_method("get_premade_default_size_flags"):
+				flags = instance.root.call("get_premade_default_size_flags")
+			instance.root.size_flags_horizontal = flags.x
+			instance.root.size_flags_vertical = flags.y
 		if not _apply_instance_style(instance):
 			instance.root.free()
 			return null
-		definition.apply_properties.call(instance.content_root, instance.values)
+		var native_values := instance.values.duplicate()
+		for name in definition.properties:
+			if UIStyleProperties.is_property(str(name)) and not values.has(name) and instance._style_layout.has(name):
+				native_values.erase(name)
+		if not definition.apply_properties.is_valid():
+			errors.append("Scene component '%s' has an invalid property applier." % id)
+			instance.root.free()
+			return null
+		definition.apply_properties.call(instance.content_root, native_values)
 		if instance.transition != null:
 			instance.transition.refresh()
 		return instance
@@ -157,6 +230,11 @@ func _build_tree(node_data: Dictionary, owner: UIComponentInstance, is_root: boo
 			sources[name] = source
 		else:
 			resolved[name] = value
+	if is_root:
+		var owner_definition: UIComponentDefinition = _definitions[owner.component_id]
+		for name in owner.values:
+			if UIStyleProperties.is_property(str(name)) and not owner_definition.properties.has(name):
+				resolved[name] = owner.values[name]
 	
 	var instance := _instantiate(id, resolved, owner._trusted)
 	if instance == null:
@@ -199,9 +277,19 @@ func update_component(instance: UIComponentInstance, changes: Dictionary) -> boo
 	if changes.has("style") or changes.has("style_overrides"):
 		errors.append("Runtime style changes are not available yet.")
 		return false
+	for name in changes:
+		if UIStyleProperties.is_property(str(name)) and not _definitions[instance.component_id].properties.has(name):
+			errors.append("Inline CSS styles can currently be set when creating a component, not through update().")
+			return false
 	var operations: Array[Dictionary] = []
 	if not _plan_updates(instance, changes, operations):
 		return false
+	for operation in operations:
+		var target: UIComponentInstance = operation["instance"]
+		var definition := _definitions[target.component_id]
+		if definition.kind == UIComponentDefinition.Kind.SCENE and not definition.apply_properties.is_valid():
+			errors.append("Scene component '%s' has an invalid property applier." % target.component_id)
+			return false
 	for operation in operations:
 		var target: UIComponentInstance = operation["instance"]
 		var values: Dictionary = operation["values"]
@@ -266,9 +354,20 @@ func _drag_node(instance: UIComponentInstance, target: bool) -> Control:
 
 func _validate_values(definition: UIComponentDefinition, values: Dictionary, trusted: bool) -> bool:
 	for name in values:
+		if name == "style_overrides":
+			if not trusted or not values[name] is Dictionary:
+				errors.append("style_overrides requires a trusted consumer Dictionary.")
+				return false
+			continue
 		if not definition.properties.has(name):
-			errors.append("Unknown property '%s.%s'." % [definition.id, name])
-			return false
+			if not UIStyleProperties.is_property(name):
+				errors.append("Unknown property '%s.%s'." % [definition.id, name])
+				return false
+			var parser := UIStyleContentRegistration.new(style_registry)
+			if parser.parse_inline({name: values[name]}) == null:
+				errors.append_array(parser.errors)
+				return false
+			continue
 		var schema: Dictionary = definition.properties[name]
 		var value: Variant = values[name]
 		if not _valid_type(schema, value):
@@ -292,7 +391,17 @@ func _valid_type(schema: Dictionary, value: Variant) -> bool:
 	var expected: int = schema["type"]
 	if value == null:
 		return expected == TYPE_NIL or schema.get("nullable", false)
-	return typeof(value) == expected or (expected == TYPE_FLOAT and typeof(value) == TYPE_INT)
+	if expected == TYPE_ARRAY:
+		if not value is Array:
+			return false
+		if schema.has("item_type"):
+			var expected_item_type: int = schema["item_type"]
+			for item in value:
+				if typeof(item) != expected_item_type:
+					return false
+		return true
+	return typeof(value) == expected \
+			or (expected == TYPE_FLOAT and typeof(value) == TYPE_INT)
 
 
 func _is_binding(value: Variant) -> bool:
@@ -317,6 +426,18 @@ func _validate_template_props(node: Dictionary, owner: UIComponentDefinition, ta
 		errors.append("Template '%s' has invalid props." % owner.id)
 		return false
 	for name in raw_props:
+		if not target.properties.has(name) and UIStyleProperties.is_property(name):
+			var inline_value: Variant = raw_props[name]
+			if _is_binding(inline_value):
+				if not owner.properties.has(inline_value["$prop"]):
+					errors.append("Unknown style binding '%s' in '%s'." % [inline_value["$prop"], owner.id])
+					return false
+			else:
+				var parser := UIStyleContentRegistration.new(style_registry)
+				if parser.parse_inline({name: inline_value}) == null:
+					errors.append_array(parser.errors)
+					return false
+			continue
 		if not target.properties.has(name):
 			errors.append("Unknown property '%s.%s' in template '%s'." % [target.id, name, owner.id])
 			return false
@@ -419,7 +540,12 @@ func ensure_interaction(instance: UIComponentInstance) -> UIComponentInteraction
 
 func _apply_instance_style(instance: UIComponentInstance) -> bool:
 	var style_id: String = instance.values.get("style", "")
-	if style_id.is_empty():
+	var inline: Dictionary = {}
+	var definition: UIComponentDefinition = _definitions[instance.component_id]
+	for name in instance.values:
+		if UIStyleProperties.is_property(str(name)) and not definition.properties.has(name):
+			inline[name] = instance.values[name]
+	if style_id.is_empty() and inline.is_empty():
 		return true
 	
 	if style_registry == null:
@@ -431,7 +557,11 @@ func _apply_instance_style(instance: UIComponentInstance) -> bool:
 		errors.append("Invalid style overrides for '%s'." % instance.component_id)
 		return false
 	
-	var style := style_registry.prepare_instance(style_id, overrides, instance._trusted)
+	var style: UIStyleDefinition
+	if inline.is_empty():
+		style = style_registry.prepare_instance(style_id, overrides, instance._trusted)
+	else:
+		style = style_registry.prepare_inline(style_id, inline, instance._trusted, overrides)
 	if style == null:
 		errors.append_array(style_registry.errors)
 		return false
@@ -444,7 +574,7 @@ func _apply_instance_style(instance: UIComponentInstance) -> bool:
 	instance._style_layout = style.layout.duplicate(true)
 	if not style.states.is_empty() or not style.transition.get("properties", []).is_empty():
 		instance.transition = UIStyleTransition.new()
-		instance.transition.setup(instance.content_root, style)
+		instance.transition.setup(instance.content_root, style, instance.content_root.get_meta(&"ui_visual_target", instance.content_root) as Control)
 	
 	return true
 
@@ -454,13 +584,16 @@ func _connect_template_routes(instance: UIComponentInstance, definition: UICompo
 		var route: Dictionary = definition.event_routes[public_event]
 		var source_name: String = route["source"]
 		var source_event := StringName(route["event"])
-		var child: UIComponentInstance = instance._named_children.get(source_name)
+		var child: UIComponentInstance
+		if source_name == "$root":
+			child = instance._root_component
+		else:
+			child = instance._named_children.get(source_name)
 		if child == null:
 			errors.append("Unknown event source '%s' in '%s'." % [
 				source_name, definition.id
 			])
 			return false
-	
 		var listener := Callable(self, "_forward_template_event").bind(
 			instance,
 			StringName(public_event)
@@ -470,7 +603,6 @@ func _connect_template_routes(instance: UIComponentInstance, definition: UICompo
 				public_event, definition.id
 			])
 			return false
-	
 		instance._event_forwarders.append({
 			"child": child,
 			"event": source_event,
@@ -555,30 +687,30 @@ func _validate_template_routes(definition: UIComponentDefinition) -> bool:
 	var named: Dictionary = {}
 	if not _collect_named_children(definition.template, named, true):
 		return false
-	
 	for public_event in definition.event_routes:
 		if not definition.events.has(StringName(public_event)):
 			errors.append("Undeclared template event '%s'." % public_event)
 			return false
-	
 		var route: Variant = definition.event_routes[public_event]
 		if not route is Dictionary:
 			errors.append("Invalid template event route '%s'." % public_event)
 			return false
-	
 		var source_name: Variant = route.get("source")
 		var source_event: Variant = route.get("event")
-		if typeof(source_name) != TYPE_STRING or typeof(source_event) != TYPE_STRING:
+		if typeof(source_name) != TYPE_STRING \
+				or typeof(source_event) != TYPE_STRING:
 			errors.append("Invalid event route '%s'." % public_event)
 			return false
-	
-		if not named.has(source_name):
-			errors.append("Unknown named child '%s' in '%s'." % [
-				source_name, definition.id
-			])
-			return false
-	
-		var child_id: String = named[source_name]
+		var child_id: String
+		if source_name == "$root":
+			child_id = definition.template["component"]
+		else:
+			if not named.has(source_name):
+				errors.append("Unknown named child '%s' in '%s'." % [
+					source_name, definition.id
+				])
+				return false
+			child_id = named[source_name]
 		var child_definition := _definitions[child_id]
 		if not child_definition.events.has(StringName(source_event)):
 			errors.append("Component '%s' does not declare event '%s'." % [

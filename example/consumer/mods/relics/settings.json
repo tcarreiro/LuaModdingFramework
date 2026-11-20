@@ -1,0 +1,15 @@
+[
+  {
+    "id": "relics:loot_frequency",
+    "display_name": "Frequência de relíquias",
+    "order": "01",
+    "value_type": "string",
+    "scope": "startup",
+    "default_value": "Normal",
+    "allowed_values": [
+      "Baixa",
+      "Normal",
+      "Alta"
+    ]
+  }
+]

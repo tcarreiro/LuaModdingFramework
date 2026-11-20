@@ -19,20 +19,18 @@ func read_control(manifest: ModManifest) -> String:
 	errors.clear()
 	var path := get_control_path(manifest)
 	var file := FileAccess.open(path, FileAccess.READ)
-
 	if file == null:
 		errors.append("Cannot open control.lua for mod '%s': '%s'." % [manifest.id, path])
 		return ""
-
+	
 	if file.get_length() > MAX_CONTROL_FILE_BYTES:
 		errors.append("control.lua exceeds the %d-byte limit for mod '%s': '%s'." % [
 			MAX_CONTROL_FILE_BYTES, manifest.id, path
 		])
 		return ""
-
+	
 	var source := file.get_as_text()
 	if file.get_error() != OK and file.get_error() != ERR_FILE_EOF:
 		errors.append("Cannot read control.lua for mod '%s': '%s'." % [manifest.id, path])
 		return ""
-
 	return source

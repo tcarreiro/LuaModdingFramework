@@ -46,7 +46,6 @@ func update(id: String, changes: Dictionary, mod_id: String) -> bool:
 		return false
 	if changes.is_empty():
 		return true
-
 	var current := _settings[id]
 	var updated := current.clone()
 	if not _apply_setting_changes(id, updated, changes):
@@ -58,7 +57,6 @@ func update(id: String, changes: Dictionary, mod_id: String) -> bool:
 	if not error.is_empty():
 		errors.append("Cannot update setting '%s': '%s'" % [id, error])
 		return false
-
 	_warn_about_forced_override(id, current, updated, changes, mod_id)
 	_settings[id] = updated
 	return true

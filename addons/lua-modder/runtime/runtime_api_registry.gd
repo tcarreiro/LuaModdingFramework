@@ -67,7 +67,6 @@ func _get_full_name(_namespace: String, function_name: String) -> String:
 func _is_valid_namespace(_namespace: String) -> bool:
 	if _namespace.is_empty():
 		return true
-
 	for segment in _namespace.split(".", true):
 		if not _is_valid_identifier(segment):
 			return false

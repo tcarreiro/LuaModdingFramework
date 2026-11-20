@@ -1,0 +1,11 @@
+{
+  "id": "relics",
+  "version": "1.0.0",
+  "game_version": "1.0",
+  "display_name": "Relíquias",
+  "description": "Novos tesouros; requer Ambientes Vivos.",
+  "author": "Consumer Demo",
+  "dependencies": [
+    "ambient >= 1.0.0"
+  ]
+}

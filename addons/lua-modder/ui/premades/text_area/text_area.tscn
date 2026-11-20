@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/lua-modder/ui/premades/text_area/ui_component_text_area.gd" id="1_script"]
+
+[node name="TextArea" type="TextEdit"]
+custom_minimum_size = Vector2(220, 105)
+script = ExtResource("1_script")

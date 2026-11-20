@@ -1,0 +1,16 @@
+[gd_scene load_steps=4 format=3 uid="uid://dbpij20paxdrw"]
+
+[ext_resource type="Script" path="res://addons/lua-modder/ui/premades/stack/ui_component_stack.gd" id="1_iqarf"]
+[ext_resource type="Script" path="res://addons/lua-modder/ui/premades/stack/ui_stack_layer_layout.gd" id="2_layer"]
+
+[sub_resource type="StyleBoxEmpty" id="1_transparent"]
+
+[node name="Stack" type="PanelContainer"]
+mouse_filter = 1
+theme_override_styles/panel = SubResource("1_transparent")
+script = ExtResource("1_iqarf")
+
+[node name="Content" type="Container" parent="."]
+layout_mode = 2
+mouse_filter = 2
+script = ExtResource("2_layer")

@@ -1,7 +1,7 @@
 class_name UIStyleTransition extends RefCounted
 
 const VISUAL_STATES := ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]
-const BUTTON_BOXES := ["normal", "hover", "pressed", "hover_pressed", "disabled"]
+const BUTTON_BOXES := ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]
 const FONT_COLORS := [
 	"font_color", "font_hover_color", "font_pressed_color",
 	"font_hover_pressed_color", "font_disabled_color"
@@ -17,6 +17,7 @@ const FONT_BY_STATE := {
 }
 
 var control: Control
+var _box_control: Control
 var style: UIStyleDefinition
 var current_state := "normal"
 
@@ -37,14 +38,16 @@ var _live_font := Color.WHITE
 var _font_active := false
 
 
-func setup(target: Control, prepared_style: UIStyleDefinition) -> void:
+func setup(target: Control, prepared_style: UIStyleDefinition, visual_target: Control = null) -> void:
 	control = target
+	_box_control = visual_target if visual_target != null else target
 	style = prepared_style
 	_base_scale = _read_scale()
 	_base_opacity = control.modulate.a
 	_remember_theme()
 	_connect_signals()
 	current_state = _detect_state()
+	_apply_non_button_state_box(current_state)
 	_apply_scalar_values(_target_values(current_state), [])
 
 
@@ -55,7 +58,6 @@ func is_animating() -> bool:
 func refresh() -> void:
 	if control == null or not is_instance_valid(control):
 		return
-
 	set_state(_detect_state())
 
 
@@ -73,7 +75,8 @@ func set_state(next_state: String) -> void:
 	_stop_tween()
 	_restore_theme()
 	current_state = next_state
-
+	_apply_non_button_state_box(current_state)
+	
 	var config := style.transition
 	var duration := float(config.get("duration", 0.0))
 	var properties: Array = config.get("properties", [])
@@ -122,7 +125,9 @@ func _start_tween(duration: float, config: Dictionary) -> void:
 	var iterations: int = config.get("iterations", 1)
 
 	for index in range(iterations):
-		_tween.tween_method(_apply_progress, 0.0, 1.0, duration)
+		var step := _tween.tween_method(_apply_progress, 0.0, 1.0, duration)
+		if index == 0:
+			step.set_delay(float(config.get("delay", 0.0)))
 
 		if index < iterations - 1:
 			_tween.tween_method(_apply_progress, 1.0, 0.0, duration)
@@ -205,19 +210,18 @@ func _detect_state() -> String:
 func _target_values(state_name: String) -> Dictionary:
 	var normal: Dictionary = style.states.get("normal", {})
 	var current: Dictionary = style.states.get(state_name, {})
-
 	var result := {
 		"opacity": current.get("opacity", normal.get("opacity", _base_opacity)),
 		"scale": current.get("scale", normal.get("scale", _base_scale)),
-		"font_color": _font_palette.get(FONT_BY_STATE[state_name], Color.WHITE)
+		"font_color": current.get("font_color", normal.get("font_color",
+					_font_palette.get(FONT_BY_STATE[state_name], Color.WHITE))
+		)
 	}
-
 	var box := _box_for_state(state_name)
 	if box != null:
 		var background := _background(box)
 		if background != null:
 			result["background_color"] = background
-
 	return result
 
 
@@ -238,31 +242,55 @@ func _current_values(state_name: String) -> Dictionary:
 
 
 func _apply_scalar_values(values: Dictionary, excluded: Array) -> void:
-	if "opacity" not in excluded:
+	if "opacity" not in excluded and _has_state_transform("opacity"):
 		var color := control.modulate
 		color.a = float(values["opacity"])
 		control.modulate = color
-	if "scale" not in excluded:
+	if "scale" not in excluded and _has_state_transform("scale"):
 		_write_scale(values["scale"])
+	if "font_color" not in excluded:
+		var active_state: Dictionary = style.states.get(current_state, {})
+		if active_state.has("font_color"):
+			_apply_live_font(values["font_color"])
+
+
+func _has_state_transform(name: String) -> bool:
+	for state_values in style.states.values():
+		if (state_values as Dictionary).has(name):
+			return true
+	return false
+
+
+func _apply_non_button_state_box(state_name: String) -> void:
+	if _box_control is BaseButton:
+		return
+	var box_name := UIStyleApplier.native_stylebox_slot(_box_control)
+	if box_name.is_empty():
+		return
+	var box := _box_for_state(state_name)
+	if box == null:
+		return
+	_box_control.add_theme_stylebox_override(box_name, box)
+	_original_boxes[box_name] = box
 #endregion
 
 
 #region Background transition
-
 func _box_for_state(state_name: String) -> StyleBox:
-	if control is Button:
+	if _box_control is BaseButton:
 		var key := state_name
-
-		if key == "focus":
+		if key == "focus" and not style.styleboxes.has("focus"):
 			key = "normal"
 		elif key == "hover_pressed" and not style.styleboxes.has(key):
 			key = "pressed"
-
-		return style.styleboxes.get(key, style.styleboxes.get("normal")) as StyleBox
-
-	if control is PanelContainer:
-		return style.styleboxes.get("panel") as StyleBox
-
+		return style.styleboxes.get(
+			key, style.styleboxes.get("normal")
+		) as StyleBox
+	var slot := UIStyleApplier.native_stylebox_slot(_box_control)
+	if not slot.is_empty():
+		var fallback := "normal" if slot == &"normal" else "panel"
+		return style.state_styleboxes.get(state_name,
+			style.styleboxes.get(fallback, style.styleboxes.get("normal"))) as StyleBox
 	return null
 
 
@@ -284,29 +312,30 @@ func _set_background(box: StyleBox, color: Color) -> void:
 func _prepare_background(previous: String, next_state: String, start_color: Color) -> bool:
 	var before := _box_for_state(previous)
 	var target := _box_for_state(next_state)
-
 	if before == null or target == null or before.get_class() != target.get_class():
 		return false
-
+	
 	if not target is StyleBoxFlat and not target is StyleBoxTexture:
 		return false
-
+	
 	_live_box = target.duplicate(true)
+	var installed: StyleBox = _original_boxes.get(next_state) as StyleBox
+	if installed == null and _box_control is BaseButton:
+		installed = _original_boxes.get("normal") as StyleBox
+	if installed != null:
+		for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+			_live_box.set_content_margin(side, installed.get_content_margin(side))
 	_set_background(_live_box, start_color)
-
 	for name in _box_names():
-		control.add_theme_stylebox_override(StringName(name), _live_box)
-
+		_box_control.add_theme_stylebox_override(StringName(name), _live_box)
 	return true
 
 
 func _box_names() -> Array:
-	if control is Button:
+	if _box_control is BaseButton:
 		return BUTTON_BOXES
-	if control is PanelContainer:
-		return ["panel"]
-	return []
-
+	var slot := UIStyleApplier.native_stylebox_slot(_box_control)
+	return [slot] if not slot.is_empty() else []
 #endregion
 
 
@@ -331,8 +360,8 @@ func _apply_live_font(color: Color) -> void:
 #region Theme preservation
 func _remember_theme() -> void:
 	for name in _box_names():
-		_original_boxes[name] = control.get_theme_stylebox(name) \
-			if control.has_theme_stylebox_override(name) else null
+		_original_boxes[name] = _box_control.get_theme_stylebox(name) \
+			if _box_control.has_theme_stylebox_override(name) else null
 
 	var names := FONT_COLORS if control is Button else ["font_color"]
 
@@ -367,9 +396,9 @@ func _restore_theme() -> void:
 		for name in _box_names():
 			var original: StyleBox = _original_boxes[name]
 			if original != null:
-				control.add_theme_stylebox_override(StringName(name), original)
+				_box_control.add_theme_stylebox_override(StringName(name), original)
 			else:
-				control.remove_theme_stylebox_override(StringName(name))
+				_box_control.remove_theme_stylebox_override(StringName(name))
 
 		_live_box = null
 

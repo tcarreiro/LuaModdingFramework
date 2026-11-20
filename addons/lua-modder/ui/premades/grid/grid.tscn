@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://fbitcwfuga5n"]
+
+[ext_resource type="Script" uid="uid://dhmi60ktmhyeb" path="res://addons/lua-modder/ui/premades/grid/ui_component_grid.gd" id="1_hm7m5"]
+
+[node name="Grid" type="GridContainer" unique_id=286103663]
+script = ExtResource("1_hm7m5")

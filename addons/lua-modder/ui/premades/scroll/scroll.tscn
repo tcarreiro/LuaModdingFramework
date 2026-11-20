@@ -1,0 +1,19 @@
+[gd_scene format=3 uid="uid://l1oddfflvyik"]
+
+[ext_resource type="Script" uid="uid://dmlupj2romel3" path="res://addons/lua-modder/ui/premades/scroll/ui_component_scroll.gd" id="1_script"]
+
+[node name="Scroll" type="ScrollContainer" unique_id=1933073102]
+mouse_filter = 0
+horizontal_scroll_mode = 0
+script = ExtResource("1_script")
+
+[node name="ContentPadding" type="MarginContainer" parent="." unique_id=2052986287]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Content" type="BoxContainer" parent="ContentPadding" unique_id=2134731454]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+vertical = true

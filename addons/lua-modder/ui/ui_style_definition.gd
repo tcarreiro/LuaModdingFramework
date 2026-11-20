@@ -13,6 +13,9 @@ var font_sizes: Dictionary = {}
 var fonts: Dictionary = {}
 var states: Dictionary = {}
 var transition: Dictionary = {}
+var visual: Dictionary = {}
+var sounds: Dictionary = {}
+var state_styleboxes: Dictionary = {}
 
 var mod_overrides: Array[String] = []
 
@@ -35,4 +38,10 @@ func copy() -> UIStyleDefinition:
 	
 	result.states = states.duplicate(true)
 	result.transition = transition.duplicate(true)
+	result.visual = visual.duplicate(true)
+	result.sounds = sounds.duplicate()
+	
+	for state_name in state_styleboxes:
+		result.state_styleboxes[state_name] = state_styleboxes[state_name].duplicate(true)
+	
 	return result

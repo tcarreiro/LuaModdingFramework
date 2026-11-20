@@ -1,0 +1,9 @@
+{
+  "id": "ambient",
+  "version": "1.0.0",
+  "game_version": "1.0",
+  "display_name": "Ambientes Vivos",
+  "description": "Altera a ambiência e a intensidade do mundo.",
+  "author": "Consumer Demo",
+  "dependencies": []
+}

@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://hg0uudyy5gid"]
+
+[ext_resource type="Script" uid="uid://dfsuxu4oanho2" path="res://addons/lua-modder/ui/premades/label/ui_component_label.gd" id="1_script"]
+
+[node name="Label" type="Label" unique_id=205599204]
+mouse_filter = 1
+script = ExtResource("1_script")

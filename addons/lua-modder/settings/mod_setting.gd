@@ -153,11 +153,9 @@ func _matches_type(value: Variant) -> bool:
 
 func clone() -> ModSetting:
 	var result := ModSetting.new()
-	
 	for prop in get_property_list():
 		if prop.type == TYPE_DICTIONARY or prop.type == TYPE_ARRAY:
 			result.set(prop.name, get(prop.name).duplicate(true))
 		else:
 			result.set(prop.name, get(prop.name))
-	
 	return result

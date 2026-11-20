@@ -9,7 +9,8 @@ const PROPERTY_TYPES := {
 	"string": TYPE_STRING,
 	"bool": TYPE_BOOL,
 	"int": TYPE_INT,
-	"float": TYPE_FLOAT
+	"float": TYPE_FLOAT,
+	"array": TYPE_ARRAY
 }
 
 var errors: Array[String] = []
@@ -120,11 +121,15 @@ func _read_properties(value: Variant) -> Dictionary:
 			property_schema["mod_editable"] = schema["mod_editable"]
 	
 		if schema.has("default"):
-			var default_value := _read_scalar(schema["default"])
+			var expected_type: int = property_schema["type"]
+			var default_value: Variant
+			if expected_type == TYPE_ARRAY:
+				default_value = _read_scalar_array(schema["default"])
+			else:
+				default_value = _read_scalar(schema["default"])
 			if not errors.is_empty():
 				return {}
 			var actual_type := typeof(default_value)
-			var expected_type: int = property_schema["type"]
 			if actual_type != expected_type \
 					and not (expected_type == TYPE_FLOAT and actual_type == TYPE_INT):
 				_fail("Invalid default type for UI property '%s'." % name)
@@ -202,18 +207,23 @@ func _read_node_props(value: Variant) -> Dictionary:
 	if source.size() > MAX_PROPERTIES:
 		_fail("UI node declares too many props.")
 		return {}
-	
 	for name in source:
 		if typeof(name) != TYPE_STRING or name.is_empty():
 			_fail("UI node property names must be strings.")
 			return {}
 		var raw_value: Variant = source[name]
 		if _is_table(raw_value):
-			var binding := (raw_value as LuaTable).to_dictionary()
-			if binding.size() != 1 or typeof(binding.get("$prop")) != TYPE_STRING:
-				_fail("Invalid binding for UI property '%s'." % name)
-				return {}
-			result[name] = {"$prop": binding["$prop"]}
+			var table := (raw_value as LuaTable).to_dictionary()
+			if table.size() == 1 and typeof(table.get("$prop")) == TYPE_STRING:
+				result[name] = {"$prop": table["$prop"]}
+			elif UIStyleProperties.is_property(name):
+				var parser := UIStyleContentRegistration.new(_registry.style_registry)
+				result[name] = parser.convert_inline_value(raw_value, name)
+				if not parser.errors.is_empty():
+					errors.append_array(parser.errors)
+					return {}
+			else:
+				result[name] = _read_scalar_array(raw_value)
 		else:
 			result[name] = _read_scalar(raw_value)
 		if not errors.is_empty():
@@ -268,6 +278,25 @@ func _read_scalar(value: Variant) -> Variant:
 			return value
 	_fail("Unsupported UI value. Only strings, booleans and finite numbers are allowed.")
 	return null
+
+
+func _read_scalar_array(value: Variant) -> Array:
+	if not _is_table(value):
+		_fail("Expected a Lua array.")
+		return []
+	var source := (value as LuaTable).to_dictionary()
+	if source.size() > MAX_PROPERTIES:
+		_fail("Lua array exceeds the allowed length.")
+		return []
+	var result: Array = []
+	for index in range(1, source.size() + 1):
+		if not source.has(index):
+			_fail("Lua array must have sequential numeric indexes.")
+			return []
+		result.append(_read_scalar(source[index]))
+		if not errors.is_empty():
+			return []
+	return result
 
 
 func _is_table(value: Variant) -> bool:

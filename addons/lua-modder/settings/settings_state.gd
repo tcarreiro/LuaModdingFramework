@@ -155,34 +155,29 @@ func _define_setting(data: Dictionary) -> bool:
 	if typeof(value_type) != TYPE_STRING:
 		errors.append("Invalid value_type in setting definition.")
 		return false
-
+	
 	var color_fields := COLOR_FIELDS if value_type == ModSetting.COLOR else []
 	var integer_fields := INTEGER_FIELDS if value_type == ModSetting.INT else []
 	LuaUtils.normalize_fields(data, ARRAY_FIELDS, color_fields, integer_fields)
-	
 	var setting := ModSetting.new()
-
 	for field in data:
 		if not DEFINITION_FIELDS.has(field):
 			errors.append("Unknown property '%s' in setting definition." % str(field))
 			return false
-
+	
 		var value: Variant = data[field]
-
 		if STRING_FIELDS.has(field) and typeof(value) != TYPE_STRING:
 			errors.append("Property '%s' must be a string." % field)
 			return false
-
+	
 		if BOOL_FIELDS.has(field) and typeof(value) != TYPE_BOOL:
 			errors.append("Property '%s' must be a boolean." % field)
 			return false
-
+	
 		if ARRAY_FIELDS.has(field) and typeof(value) != TYPE_ARRAY:
 			errors.append("Property '%s' must be an array." % field)
 			return false
-
 		setting.set(field, value)
-
 	return _registry.register(setting, _current_mod_id)
 
 
@@ -190,20 +185,18 @@ func _lua_get(id: Variant) -> Variant:
 	if typeof(id) != TYPE_STRING:
 		errors.append("Setting ID must be a string.")
 		return null
-
+	
 	var setting := _registry.get_setting(id)
 	if setting == null:
 		return null
-
+	
 	var data := {}
-
 	for field in DEFINITION_FIELDS:
 		var value: Variant = setting.get(field)
 		if value != null:
 			data[field] = value
-
+	
 	data["owner_mod_id"] = setting.owner_mod_id
-
 	return LuaUtils.to_lua_value(_lua_state, data)
 
 
@@ -214,26 +207,25 @@ func _lua_update(id: Variant, changes: Variant) -> bool:
 	if typeof(id) != TYPE_STRING:
 		errors.append("Setting ID must be a string.")
 		return false
-
+	
 	var data: Variant = LuaUtils.read_table(changes)
 	if data == null:
 		errors.append("Expected a Lua table.")
 		return false
-
+	
 	var setting := _registry.get_setting(id)
 	if setting == null:
 		errors.append("Setting '%s' does not exist." % id)
 		return false
-	
+		
 	var value_type: Variant = data.get(ModSetting.VALUE_TYPE, setting.value_type)
 	if typeof(value_type) != TYPE_STRING:
 		errors.append("Invalid value_type when updating '%s'." % id)
 		return false
-	
+		
 	var color_fields := COLOR_FIELDS if value_type == ModSetting.COLOR else []
 	var integer_fields := INTEGER_FIELDS if value_type == ModSetting.INT else []
 	LuaUtils.normalize_fields(data, ARRAY_FIELDS, color_fields, integer_fields)
-
 	return _registry.update(id, data, _current_mod_id)
 
 
